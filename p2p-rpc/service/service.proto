@@ -1,0 +1,18 @@
+syntax = "proto3";
+package proto;
+
+option go_package = "crumbs/p2p-rpc/service";
+
+service PingService {
+  rpc Ping (PingRequest) returns (PongReply) {}
+}
+
+// The request message containing the user's name.
+message PingRequest {
+  string name = 1;
+}
+
+// The response message containing the greetings
+message PongReply {
+  string message = 1;
+}
