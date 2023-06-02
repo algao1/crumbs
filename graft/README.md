@@ -12,3 +12,7 @@ PASS TestElectionFollowerComesBack map[0:true 1:true 2:true TEST:true] ; entries
 
 PASS
 ```
+
+## Sauce
+- https://raft.github.io/raft.pdf
+- https://eli.thegreenplace.net/2020/implementing-raft-part-1-elections
