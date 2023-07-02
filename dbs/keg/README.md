@@ -16,9 +16,9 @@ KegDB maintains a collection of stale files and an active file. The files store 
 
 Each record has the following binary format
 ```
-+-----------+----------+------------+-------+-----+
-| Timestamp | Key Size | Value Size | Value | Key |
-+-----------+----------+------------+-------+-----+
++-----------+--------+----------+------------+-------+-----+
+| Timestamp | Expiry | Key Size | Value Size | Value | Key |
++-----------+--------+----------+------------+-------+-----+
 ```
 The first three entries are considered part of the header. The checksum (CRC) is left out of the implementation for simplicity's sake, but having it would allow us to check the integrity of the data.
 
