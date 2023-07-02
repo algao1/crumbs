@@ -5,5 +5,5 @@
 ## p2p_rpc
 A toy implementation of a peer-to-peer (p2p) network over gRPC using [Consul](https://github.com/hashicorp/consul) for service discovery.
 
-## graft
-Instructional implementation of the Raft distributed consensus algorithm in Go. Following [this](https://eli.thegreenplace.net/2020/implementing-raft-part-0-introduction/) wonderful series of blog posts.
+## dbs/keg
+A simple no-dependency disk-based key-value store, written for fun.
