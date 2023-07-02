@@ -19,7 +19,7 @@ type Keg struct {
 	keyDir  map[string]Hint
 	bufPool sync.Pool
 
-	active *ActiveFile
+	active ActiveFile
 	stale  map[uint32]StaleFile
 }
 
@@ -29,51 +29,20 @@ func New(dir string) (*Keg, error) {
 		return nil, fmt.Errorf("unable to initialize directory: %w", err)
 	}
 
-	dataFiles, err := getDataFiles(dir)
-	if err != nil {
-		return nil, fmt.Errorf("unable to get data files: %w", err)
-	}
-
-	fileID := uint32(0)
-	if len(dataFiles) > 0 {
-		fileID, err = getIDFromFile(dataFiles[len(dataFiles)-1])
-		if err != nil {
-			return nil, fmt.Errorf("unable to get file id: %w", err)
-		}
-	}
-
-	kegPath := kegFile(dir, fileID)
-
-	writer, err := os.OpenFile(kegPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return nil, fmt.Errorf("unable to open file %s for write: %w", kegPath, err)
-	}
-	reader, err := os.Open(kegPath)
-	if err != nil {
-		return nil, fmt.Errorf("unable to open file %s for read: %w", kegPath, err)
-	}
-	fs, err := writer.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("unable to stat file %s: %w", kegPath, err)
-	}
-
 	k := &Keg{
 		dir:    dir,
 		keyDir: make(map[string]Hint),
 		bufPool: sync.Pool{New: func() any {
 			return bytes.NewBuffer([]byte{})
 		}},
-		active: &ActiveFile{
-			Writer: writer,
-			Reader: reader,
-			FileID: fileID,
-			Offset: uint32(fs.Size()),
-		},
 		stale: make(map[uint32]StaleFile),
 	}
 
-	err = k.loadKeyDir(dataFiles)
-	if err != nil {
+	if err := k.loadActiveFile(); err != nil {
+		return nil, fmt.Errorf("unable to load active file: %w", err)
+	}
+
+	if err := k.loadKeyDir(); err != nil {
 		return nil, fmt.Errorf("unable to load key dir from files: %w", err)
 	}
 
@@ -84,44 +53,14 @@ func (k *Keg) Put(key, value []byte) error {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 
-	header := Header{
-		Timestamp: uint32(time.Now().Unix()),
-		KeySize:   uint32(len(key)),
-		ValueSize: uint32(len(value)),
+	if err := k.put(key, value); err != nil {
+		return err
 	}
-
-	buf := k.bufPool.Get().(*bytes.Buffer)
-	defer k.bufPool.Put(buf)
-	defer buf.Reset()
-
-	if err := header.encode(buf); err != nil {
-		return fmt.Errorf("unable to encode header: %w", err)
-	}
-	if _, err := buf.Write(value); err != nil {
-		return fmt.Errorf("unable to write value: %w", err)
-	}
-	if _, err := buf.Write(key); err != nil {
-		return fmt.Errorf("unable to write key: %w", err)
-	}
-
-	if k.active.Offset+uint32(buf.Len()) > MAX_FILE_SIZE {
-		err := k.rotate(1)
-		if err != nil {
-			return fmt.Errorf("unable to rotate file: %w", err)
-		}
-	}
-
-	n, err := k.active.Writer.Write(buf.Bytes())
-	if err != nil {
-		return fmt.Errorf("unable to write buffer to file: %w", err)
-	}
-
 	k.keyDir[string(key)] = Hint{
 		FileID:      k.active.FileID,
-		ValueOffset: k.active.Offset + HEADER_SIZE,
+		ValueOffset: k.active.Offset - uint32(len(value)+len(key)),
 		ValueSize:   uint32(len(value)),
 	}
-	k.active.Offset += uint32(n)
 	return nil
 }
 
@@ -271,6 +210,43 @@ func (k *Keg) Compact() error {
 	return nil
 }
 
+func (k *Keg) put(key, value []byte) error {
+	header := Header{
+		Timestamp: uint32(time.Now().Unix()),
+		KeySize:   uint32(len(key)),
+		ValueSize: uint32(len(value)),
+	}
+
+	buf := k.bufPool.Get().(*bytes.Buffer)
+	defer k.bufPool.Put(buf)
+	defer buf.Reset()
+
+	if err := header.encode(buf); err != nil {
+		return fmt.Errorf("unable to encode header: %w", err)
+	}
+	if _, err := buf.Write(value); err != nil {
+		return fmt.Errorf("unable to write value: %w", err)
+	}
+	if _, err := buf.Write(key); err != nil {
+		return fmt.Errorf("unable to write key: %w", err)
+	}
+
+	if k.active.Offset+uint32(buf.Len()) > MAX_FILE_SIZE {
+		err := k.rotate(1)
+		if err != nil {
+			return fmt.Errorf("unable to rotate file: %w", err)
+		}
+	}
+
+	n, err := k.active.Writer.Write(buf.Bytes())
+	if err != nil {
+		return fmt.Errorf("unable to write buffer to file: %w", err)
+	}
+	k.active.Offset += uint32(n)
+
+	return nil
+}
+
 func (k *Keg) getStaleKeysFileIDs() ([][]byte, map[uint32]any) {
 	staleKeys := make([][]byte, 0)
 	staleFileIDs := make(map[uint32]any)
@@ -388,8 +364,51 @@ func getIDFromFile(file string) (uint32, error) {
 	return id, nil
 }
 
+func (k *Keg) loadActiveFile() error {
+	dataFiles, err := getDataFiles(k.dir)
+	if err != nil {
+		return fmt.Errorf("unable to get data files: %w", err)
+	}
+
+	fileID := uint32(0)
+	if len(dataFiles) > 0 {
+		fileID, err = getIDFromFile(dataFiles[len(dataFiles)-1])
+		if err != nil {
+			return fmt.Errorf("unable to get file id: %w", err)
+		}
+	}
+
+	kegPath := kegFile(k.dir, fileID)
+
+	writer, err := os.OpenFile(kegPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("unable to open file %s for write: %w", kegPath, err)
+	}
+	reader, err := os.Open(kegPath)
+	if err != nil {
+		return fmt.Errorf("unable to open file %s for read: %w", kegPath, err)
+	}
+	fs, err := writer.Stat()
+	if err != nil {
+		return fmt.Errorf("unable to stat file %s: %w", kegPath, err)
+	}
+
+	k.active = ActiveFile{
+		Writer: writer,
+		Reader: reader,
+		FileID: fileID,
+		Offset: uint32(fs.Size()),
+	}
+	return nil
+}
+
 // loadKeyDirFromFiles populates the keyDir.
-func (k *Keg) loadKeyDir(dataFiles []string) error {
+func (k *Keg) loadKeyDir() error {
+	dataFiles, err := getDataFiles(k.dir)
+	if err != nil {
+		return fmt.Errorf("unable to get data files: %w", err)
+	}
+
 	for i, df := range dataFiles {
 		id, err := getIDFromFile(df)
 		if err != nil {
