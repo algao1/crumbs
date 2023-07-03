@@ -16,7 +16,7 @@ type Keg struct {
 	mu sync.RWMutex
 
 	dir     string
-	keyDir  map[string]Hint
+	keyDir  KeyDir
 	bufPool sync.Pool
 
 	active ActiveFile
@@ -31,19 +31,19 @@ func New(dir string) (*Keg, error) {
 
 	k := &Keg{
 		dir:    dir,
-		keyDir: make(map[string]Hint),
+		keyDir: NewKeyDir(),
 		bufPool: sync.Pool{New: func() any {
 			return bytes.NewBuffer([]byte{})
 		}},
 		stale: make(map[uint32]StaleFile),
 	}
 
-	if err := k.loadActiveFile(); err != nil {
-		return nil, fmt.Errorf("unable to load active file: %w", err)
-	}
-
 	if err := k.loadKeyDir(); err != nil {
 		return nil, fmt.Errorf("unable to load key dir from files: %w", err)
+	}
+
+	if err := k.loadActiveFile(); err != nil {
+		return nil, fmt.Errorf("unable to load active file: %w", err)
 	}
 
 	return k, nil
@@ -51,27 +51,27 @@ func New(dir string) (*Keg, error) {
 
 func (k *Keg) Put(key, value []byte) error {
 	k.mu.Lock()
-	defer k.mu.Unlock()
-
 	if err := k.put(key, value); err != nil {
 		return err
 	}
-	k.keyDir[string(key)] = Hint{
+	k.mu.Unlock()
+
+	k.keyDir.Add(key, Hint{
 		FileID:      k.active.FileID,
 		ValueOffset: k.active.Offset - uint32(len(value)+len(key)),
 		ValueSize:   uint32(len(value)),
-	}
+	})
 	return nil
 }
 
 func (k *Keg) Get(key []byte) ([]byte, error) {
-	k.mu.RLock()
-	defer k.mu.RUnlock()
-
-	hint, ok := k.keyDir[string(key)]
-	if !ok {
+	hint, err := k.keyDir.Get(key)
+	if err != nil {
 		return []byte{}, nil
 	}
+
+	k.mu.RLock()
+	defer k.mu.RUnlock()
 
 	reader := k.active.Reader
 	if hint.FileID != k.active.FileID {
@@ -79,60 +79,53 @@ func (k *Keg) Get(key []byte) ([]byte, error) {
 	}
 
 	v := make([]byte, hint.ValueSize)
-	_, err := reader.ReadAt(v, int64(hint.ValueOffset))
+	_, err = reader.ReadAt(v, int64(hint.ValueOffset))
 	if err != nil {
 		return nil, fmt.Errorf("unable to read value for get %s: %w", key, err)
 	}
 	return v, nil
 }
 
-func (k *Keg) Fold(f func(k string, v []byte)) error {
-	k.mu.RLock()
-	for key, hint := range k.keyDir {
+func (k *Keg) Delete(key []byte) (uint32, error) {
+	h, err := k.keyDir.Get(key)
+	if err != nil {
+		return 0, nil
+	}
+
+	k.mu.Lock()
+	err = k.put(key, []byte{})
+	if err != nil {
+		return 0, fmt.Errorf("unable to delete key: %w", err)
+	}
+	k.mu.Unlock()
+
+	k.keyDir.Delete(key)
+
+	return h.ValueSize + HEADER_SIZE, nil
+}
+
+func (k *Keg) Fold(f func(k []byte, v []byte)) error {
+	k.keyDir.Fold(func(key []byte, hint Hint) error {
+		k.mu.RLock()
 		var reader io.ReaderAt
 		if hint.FileID != k.active.FileID {
 			reader = k.stale[hint.FileID].Reader
+		} else {
+			reader = k.active.Reader
 		}
-		v := make([]byte, hint.ValueOffset)
+		k.mu.RUnlock()
+
+		v := make([]byte, hint.ValueSize)
 		_, err := reader.ReadAt(v, int64(hint.ValueOffset))
 		if err != nil {
 			return fmt.Errorf("unable to read value for fold: %w", err)
 		}
 		f(key, v)
-	}
-	k.mu.RUnlock()
+
+		return nil
+	})
 	return nil
 }
-
-func (k *Keg) Delete(key []byte) (uint32, error) {
-	k.mu.RLock()
-	h, ok := k.keyDir[string(key)]
-	k.mu.RUnlock()
-
-	if !ok {
-		return 0, nil
-	}
-
-	err := k.Put(key, []byte{})
-	if err != nil {
-		return 0, fmt.Errorf("unable to delete key: %w", err)
-	}
-
-	k.mu.Lock()
-	delete(k.keyDir, string(key))
-	k.mu.Unlock()
-
-	return h.ValueSize + HEADER_SIZE, nil
-}
-
-func (k *Keg) Close() {
-	k.mu.Lock()
-	defer k.mu.Unlock()
-	k.active.Writer.Close()
-}
-
-// TODO: I don't love the design of Compact(), but will
-// leave for another day to change.
 
 func (k *Keg) Compact() error {
 	staleKeys, staleFileIDs := k.getStaleKeysFileIDs()
@@ -159,8 +152,8 @@ func (k *Keg) Compact() error {
 	tempKeg.Close()
 	numFiles := int(tempKeg.active.FileID) + 1
 
-	k.mu.Lock()
 	// Rotate files to make space for temp files.
+	k.mu.Lock()
 	baseFileID := k.active.FileID
 	k.rotate(uint32(numFiles + 1))
 	k.mu.Unlock()
@@ -170,12 +163,10 @@ func (k *Keg) Compact() error {
 		return fmt.Errorf("unable to move temp files: %w", err)
 	}
 
-	fileKeyDir := make(map[uint32]map[string]Hint)
 	k.mu.Lock()
 	for i := 0; i < numFiles; i++ {
 		fID := baseFileID + uint32(i+1)
 		fName := kegFile(k.dir, fID)
-		fileKeyDir[fID] = make(map[string]Hint)
 
 		f, err := os.Open(fName)
 		if err != nil {
@@ -185,24 +176,23 @@ func (k *Keg) Compact() error {
 	}
 	k.mu.Unlock()
 
-	// Update keydir. We move the temporary files as a contiguous collection.
-	for nk, h := range tempKeg.keyDir {
-		k.mu.Lock()
-		if _, ok := k.keyDir[nk]; ok {
-			h.FileID += baseFileID + 1
-			k.keyDir[nk] = h
-			fileKeyDir[h.FileID][nk] = h
-		} else {
-			delete(tempKeg.keyDir, nk)
+	newFKDirs := make([]FileKeyDir, len(tempKeg.keyDir.FKDirs))
+	for idx, fkd := range tempKeg.keyDir.FKDirs {
+		nfkd := fkd
+		nfkd.FileID += baseFileID + 1
+		for key, hint := range nfkd.Hints {
+			hint.FileID = nfkd.FileID
+			nfkd.Hints[key] = hint
 		}
-		k.mu.Unlock()
+		newFKDirs[idx] = nfkd
+		k.keyDir.AddFileKeyDir(nfkd)
 	}
 
 	err = k.removeStaleFiles(staleFileIDs)
 	if err != nil {
 		return fmt.Errorf("unable to remove stale files: %w", err)
 	}
-	err = k.generateHintFiles(fileKeyDir, numFiles, baseFileID)
+	err = k.generateHintFiles(newFKDirs, numFiles, baseFileID)
 	if err != nil {
 		return fmt.Errorf("unable to generate hint files: %w", err)
 	}
@@ -210,6 +200,13 @@ func (k *Keg) Compact() error {
 	return nil
 }
 
+func (k *Keg) Close() {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.active.Writer.Close()
+}
+
+// put requires the caller to acquire the lock on Keg.
 func (k *Keg) put(key, value []byte) error {
 	header := Header{
 		Timestamp: uint32(time.Now().Unix()),
@@ -252,21 +249,16 @@ func (k *Keg) getStaleKeysFileIDs() ([][]byte, map[uint32]any) {
 	staleFileIDs := make(map[uint32]any)
 
 	k.mu.RLock()
-	for key, hint := range k.keyDir {
-		if hint.FileID != k.active.FileID {
+	activeFileID := k.active.FileID
+	k.mu.RUnlock()
+
+	k.keyDir.Fold(func(key []byte, hint Hint) error {
+		if hint.FileID < activeFileID {
 			staleKeys = append(staleKeys, []byte(key))
 			staleFileIDs[hint.FileID] = struct{}{}
 		}
-	}
-	k.mu.RUnlock()
-
-	if len(staleKeys) == 0 {
-		k.mu.RLock()
-		for i := uint32(0); i < k.active.FileID; i++ {
-			staleFileIDs[i] = struct{}{}
-		}
-		k.mu.RUnlock()
-	}
+		return nil
+	})
 
 	return staleKeys, staleFileIDs
 }
@@ -289,31 +281,39 @@ func (k *Keg) moveTempFiles(tempDir string, baseFileID uint32) error {
 }
 
 func (k *Keg) removeStaleFiles(fileIDs map[uint32]any) error {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+
 	for id := range fileIDs {
 		file := kegFile(k.dir, id)
 		if err := os.Remove(file); err != nil {
 			return fmt.Errorf("unable to remove file: %w", err)
 		}
-		k.mu.Lock()
 		delete(k.stale, id)
-		k.mu.Unlock()
 	}
 	return nil
 }
 
-func (k *Keg) generateHintFiles(fileKeyDir map[uint32]map[string]Hint, n int, baseFileID uint32) error {
+func (k *Keg) generateHintFiles(fileKeyDirs []FileKeyDir, n int, baseFileID uint32) error {
 	for i := 0; i < n; i++ {
 		fName := hintFile(k.dir, baseFileID+uint32(i+1))
-		fKeyDir := fileKeyDir[baseFileID+uint32(i+1)]
 
 		f, err := os.OpenFile(fName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			return fmt.Errorf("unable to open file: %w", err)
 		}
 
-		err = gob.NewEncoder(bufio.NewWriter(f)).Encode(fKeyDir)
+		buf := new(bytes.Buffer)
+		encoder := gob.NewEncoder(buf)
+
+		err = encoder.Encode(fileKeyDirs[i].Hints)
 		if err != nil {
 			return fmt.Errorf("unable to encode keyDir: %w", err)
+		}
+
+		_, err = f.Write(buf.Bytes())
+		if err != nil {
+			return fmt.Errorf("unable to write bytes to hint file: %w", err)
 		}
 	}
 	return nil
@@ -329,6 +329,11 @@ func (k *Keg) rotate(incr uint32) error {
 	k.stale[k.active.FileID] = StaleFile{Reader: k.active.Reader, FileID: k.active.FileID}
 	k.active.FileID += incr
 	k.active.Offset = 0
+
+	k.keyDir.AddFileKeyDir(FileKeyDir{
+		FileID: k.active.FileID,
+		Hints:  make(map[string]Hint),
+	})
 
 	fpath := kegFile(k.dir, k.active.FileID)
 
@@ -399,6 +404,11 @@ func (k *Keg) loadActiveFile() error {
 		FileID: fileID,
 		Offset: uint32(fs.Size()),
 	}
+	k.keyDir.AddFileKeyDir(FileKeyDir{
+		FileID: fileID,
+		Hints:  make(map[string]Hint),
+	})
+
 	return nil
 }
 
@@ -451,21 +461,25 @@ func (k *Keg) loadKeyDir() error {
 // decodeKeyDirFromHint populates keyDir from the hint file.
 func (k *Keg) decodeKeyDirFromHint(file *os.File) error {
 	decoder := gob.NewDecoder(bufio.NewReader(file))
-	var hintKeyDir map[string]Hint
+	var fileKeyDir FileKeyDir
 
-	err := decoder.Decode(&hintKeyDir)
+	err := decoder.Decode(&fileKeyDir.Hints)
 	if err != nil {
-		return fmt.Errorf("unable to populate from hint file: %w", err)
+		return fmt.Errorf("unable to decode from hint file: %w", err)
 	}
-	for key, h := range hintKeyDir {
-		k.keyDir[key] = h
-	}
+	k.keyDir.AddFileKeyDir(fileKeyDir)
+
 	return nil
 }
 
 // populateKeys populates keyDir from the data file.
 func (k *Keg) populateKeyDirFromData(reader io.ReaderAt, fileID, size uint32) error {
 	offset := uint32(0)
+
+	k.keyDir.AddFileKeyDir(FileKeyDir{
+		FileID: fileID,
+		Hints:  make(map[string]Hint),
+	})
 
 	for offset < size {
 		r, err := readRecord(reader, offset)
@@ -475,26 +489,16 @@ func (k *Keg) populateKeyDirFromData(reader io.ReaderAt, fileID, size uint32) er
 
 		size := HEADER_SIZE + uint32(len(r.Value)) + uint32(len(r.Key))
 		if r.Header.ValueSize > 0 {
-			hint := Hint{
+			k.keyDir.Add(r.Key, Hint{
 				FileID:      fileID,
 				ValueOffset: offset + HEADER_SIZE,
 				ValueSize:   uint32(len(r.Value)),
-			}
-			k.keyDir[string(r.Key)] = hint
-		}
-		if r.Header.ValueSize == 0 {
-			delete(k.keyDir, string(r.Key))
+			})
+		} else {
+			k.keyDir.Delete(r.Key)
 		}
 		offset += size
 	}
 
 	return nil
-}
-
-func kegFile(dir string, fileID uint32) string {
-	return fmt.Sprintf("%s/%d.keg", dir, fileID)
-}
-
-func hintFile(dir string, fileID uint32) string {
-	return fmt.Sprintf("%s/%d.hint", dir, fileID)
 }

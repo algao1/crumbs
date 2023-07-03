@@ -1,6 +1,6 @@
 # KegDB
 
-KegDB is a simple no-dependency disk-based key-value store (under 1K LOC) based on [Bitcask](https://riak.com/assets/bitcask-intro.pdf) that is, *gasp*, **blazingly fast**. It is meant purely as an educational project to learn more about how databases work.
+KegDB is a simple no-dependency disk-based key-value store (under 1K LOC) based on [Bitcask](https://riak.com/assets/bitcask-intro.pdf) that is, *gasp*, not **blazingly fast**. It is meant purely as an educational project to learn more about how databases work.
 
 Currently, it supports the following operations:
 
@@ -9,6 +9,7 @@ Currently, it supports the following operations:
 - Delete
 - Fold
 - Compact
+- Close
 
 ## Design
 
@@ -39,7 +40,12 @@ Hint files help speed up the initialization times for KegDB by skipping over dec
 
 ## Benchmarks
 
-Nothing concrete here.
+```
+KegBenchPutKeys: 81.883449ms
+KegBenchGetSeqKeys: 32.381009ms
+KegBenchGetRandKeys: 37.646061ms
+KegBenchFoldKeys: 34.297562ms
+```
 
 ## Plans
 

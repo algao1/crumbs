@@ -10,6 +10,10 @@ import (
 
 const TEST_DIR = ".testdata"
 
+func init() {
+	cleanupKeg()
+}
+
 func initKeg() *Keg {
 	k, err := New(TEST_DIR)
 	if err != nil {
@@ -78,10 +82,38 @@ func TestDelete(t *testing.T) {
 	})
 }
 
-func TestPutRotate(t *testing.T) {
+func TestFold(t *testing.T) {
+	size := 1000
+
 	k := initKeg()
-	for i := 0; i < 1000; i++ {
-		if i%100 == 0 {
+
+	for i := 0; i < size; i++ {
+		err := k.Put(
+			[]byte(fmt.Sprintf("key_%d", i)),
+			[]byte(fmt.Sprintf("val_%d", i)),
+		)
+		assert.Nil(t, err)
+	}
+
+	unique := make(map[string]any)
+	err := k.Fold(func(k, v []byte) {
+		unique[string(k)] = struct{}{}
+	})
+	assert.Nil(t, err)
+	assert.Equal(t, size, len(unique))
+
+	t.Cleanup(func() {
+		cleanupKeg()
+	})
+}
+
+func TestPutRotate(t *testing.T) {
+	rotateAfter := 100
+	size := 1000
+
+	k := initKeg()
+	for i := 0; i < size; i++ {
+		if i%rotateAfter == 0 {
 			k.rotate(1)
 		}
 		err := k.Put(
@@ -92,7 +124,7 @@ func TestPutRotate(t *testing.T) {
 	}
 
 	k = initKeg()
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < size; i++ {
 		v, err := k.Get([]byte(fmt.Sprintf("key_%d", i)))
 		assert.Nil(t, err)
 		assert.Equal(t, fmt.Sprintf("val_%d", i), string(v))
@@ -104,10 +136,13 @@ func TestPutRotate(t *testing.T) {
 }
 
 func TestDeleteCompact(t *testing.T) {
+	rotateAfter := 100
+	size := 1000
+
 	k := initKeg()
 
-	for i := 0; i < 1000; i++ {
-		if i%100 == 0 {
+	for i := 0; i < size; i++ {
+		if i%rotateAfter == 0 {
 			k.rotate(1)
 		}
 		err := k.Put(
@@ -117,7 +152,7 @@ func TestDeleteCompact(t *testing.T) {
 		assert.Nil(t, err)
 	}
 
-	for i := 0; i < 1000; i += 3 {
+	for i := 0; i < size; i += 3 {
 		_, err := k.Delete(
 			[]byte(fmt.Sprintf("key_%d", i)),
 		)
@@ -126,7 +161,7 @@ func TestDeleteCompact(t *testing.T) {
 	assert.Nil(t, k.Compact())
 
 	k = initKeg()
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < size; i++ {
 		expectV := []byte(fmt.Sprintf("val_%d", i))
 		if i%3 == 0 {
 			expectV = []byte{}

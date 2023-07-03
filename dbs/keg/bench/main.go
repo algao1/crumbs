@@ -5,7 +5,7 @@ import (
 )
 
 const MAX_OPS = 10000
-const BIG_STRING_SIZE = 1000
+const BIG_STRING_SIZE = 10000
 
 func main() {
 	os.RemoveAll("bench/data")
@@ -14,5 +14,7 @@ func main() {
 		panic(err)
 	}
 	k.BenchPutKeys()
-	k.BenchGetKeys()
+	k.BenchGetSeqKeys()
+	k.BenchGetRandKeys()
+	k.BenchFoldKeys()
 }

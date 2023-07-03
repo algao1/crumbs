@@ -42,7 +42,19 @@ func (k *KegStore) BenchPutKeys() {
 	fmt.Printf("KegBenchPutKeys: %s\n", time.Since(t))
 }
 
-func (k *KegStore) BenchGetKeys() {
+func (k *KegStore) BenchGetSeqKeys() {
+	t := time.Now()
+	for i := 0; i < MAX_OPS; i++ {
+		key := []byte(fmt.Sprintf("key_%d", i))
+		_, err := k.keg.Get(key)
+		if err != nil {
+			panic(err)
+		}
+	}
+	fmt.Printf("KegBenchGetSeqKeys: %s\n", time.Since(t))
+}
+
+func (k *KegStore) BenchGetRandKeys() {
 	t := time.Now()
 	for i := 0; i < MAX_OPS; i++ {
 		key := []byte(fmt.Sprintf("key_%d", rand.Int31n(MAX_OPS)))
@@ -51,5 +63,14 @@ func (k *KegStore) BenchGetKeys() {
 			panic(err)
 		}
 	}
-	fmt.Printf("KegBenchGetKeys: %s\n", time.Since(t))
+	fmt.Printf("KegBenchGetRandKeys: %s\n", time.Since(t))
+}
+
+func (k *KegStore) BenchFoldKeys() {
+	t := time.Now()
+	err := k.keg.Fold(func(k, v []byte) {})
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("KegBenchFoldKeys: %s\n", time.Since(t))
 }
