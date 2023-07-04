@@ -50,12 +50,9 @@ func New(dir string) (*Keg, error) {
 }
 
 func (k *Keg) Put(key, value []byte) error {
-	k.mu.Lock()
 	if err := k.put(key, value); err != nil {
 		return err
 	}
-	k.mu.Unlock()
-
 	k.keyDir.Add(key, Hint{
 		FileID:      k.active.FileID,
 		ValueOffset: k.active.Offset - uint32(len(value)+len(key)),
@@ -69,16 +66,15 @@ func (k *Keg) Get(key []byte) ([]byte, error) {
 	if err != nil {
 		return []byte{}, nil
 	}
+	v := make([]byte, hint.ValueSize)
 
 	k.mu.RLock()
-	defer k.mu.RUnlock()
-
 	reader := k.active.Reader
 	if hint.FileID != k.active.FileID {
 		reader = k.stale[hint.FileID].Reader
 	}
+	k.mu.RUnlock()
 
-	v := make([]byte, hint.ValueSize)
 	_, err = reader.ReadAt(v, int64(hint.ValueOffset))
 	if err != nil {
 		return nil, fmt.Errorf("unable to read value for get %s: %w", key, err)
@@ -92,15 +88,12 @@ func (k *Keg) Delete(key []byte) (uint32, error) {
 		return 0, nil
 	}
 
-	k.mu.Lock()
 	err = k.put(key, []byte{})
 	if err != nil {
 		return 0, fmt.Errorf("unable to delete key: %w", err)
 	}
-	k.mu.Unlock()
 
 	k.keyDir.Delete(key)
-
 	return h.ValueSize + HEADER_SIZE, nil
 }
 
@@ -127,6 +120,7 @@ func (k *Keg) Fold(f func(k []byte, v []byte)) error {
 	return nil
 }
 
+// Compact is minimally blocking (hopefully).
 func (k *Keg) Compact() error {
 	staleKeys, staleFileIDs := k.getStaleKeysFileIDs()
 	if len(staleFileIDs) == 0 {
@@ -139,13 +133,11 @@ func (k *Keg) Compact() error {
 	}
 
 	for _, sk := range staleKeys {
-		v, err := k.Get(sk)
-		if err != nil {
-			// If key doesn't exist, or error, doesn't matter.
+		v, _ := k.Get(sk)
+		if len(v) == 0 {
 			continue
 		}
-		err = tempKeg.Put(sk, v)
-		if err != nil {
+		if err = tempKeg.Put(sk, v); err != nil {
 			return fmt.Errorf("unable to put in temp keg: %w", err)
 		}
 	}
@@ -206,8 +198,10 @@ func (k *Keg) Close() {
 	k.active.Writer.Close()
 }
 
-// put requires the caller to acquire the lock on Keg.
 func (k *Keg) put(key, value []byte) error {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+
 	header := Header{
 		Timestamp: uint32(time.Now().Unix()),
 		KeySize:   uint32(len(key)),
