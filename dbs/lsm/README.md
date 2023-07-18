@@ -39,3 +39,5 @@ benchRandGetKeyVals:
 ## Design
 
 TODO.
+
+See [paper](https://arxiv.org/pdf/2202.04522.pdf) on various compaction designs.

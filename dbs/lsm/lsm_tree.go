@@ -16,12 +16,11 @@ const (
 	MAX_MEM_TABLES = 4
 
 	DEFAULT_SPARSENESS = 16
-	DEFAULT_ERROR_PCT  = 0.01
+	DEFAULT_ERROR_PCT  = 0.05
 )
 
 // TODO:
 // - add compaction
-// - add a cache for SSTable to improve sequential reads
 // - add a WAL
 // - add better logging
 
@@ -30,6 +29,7 @@ type Memtable interface {
 	Insert(key string, val []byte)
 	Traverse(f func(k string, v []byte))
 	Size() int
+	Nodes() int
 }
 
 type SSTable struct {
@@ -143,7 +143,7 @@ func (lt *LSMTree) Close() error {
 }
 
 func (lt *LSMTree) flushPeriodically() {
-	t := time.NewTicker(time.Second)
+	t := time.NewTicker(5 * time.Second)
 	for {
 		select {
 		case <-lt.flusherCloser:
@@ -225,7 +225,7 @@ func (lt *LSMTree) flush(mt Memtable) error {
 	defer dataFile.Close()
 
 	sparseIndex := NewSparseIndex()
-	bf, err := NewBloomFilter(MEM_TABLE_SIZE/128, lt.errorPct)
+	bf, err := NewBloomFilter(mt.Nodes(), lt.errorPct)
 	if err != nil {
 		return fmt.Errorf("unable to create bloom filter: %w", err)
 	}

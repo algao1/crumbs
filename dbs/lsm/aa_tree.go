@@ -15,8 +15,9 @@ func init() {
 }
 
 type AATree struct {
-	Root *AANode
-	size int
+	Root  *AANode
+	size  int
+	nodes int
 }
 
 func NewAATree() *AATree {
@@ -27,6 +28,10 @@ func NewAATree() *AATree {
 
 func (aa *AATree) Size() int {
 	return aa.size
+}
+
+func (aa *AATree) Nodes() int {
+	return aa.nodes
 }
 
 func (aa *AATree) Find(key string) ([]byte, bool) {
@@ -80,6 +85,7 @@ func (aa *AATree) find(k string, an *AANode) ([]byte, bool) {
 func (aa *AATree) insert(k *AANode, key string, val []byte) *AANode {
 	if k == nullNode {
 		aa.size += len(key) + len(val) + int(AANODE_SIZE)
+		aa.nodes++
 		return &AANode{
 			Key:   key,
 			Val:   val,
@@ -121,6 +127,7 @@ func (aa *AATree) remove(k *AANode, key string) *AANode {
 			// if it is present.
 			if deleted != nullNode && key == deleted.Key {
 				aa.size -= len(k.Key) + len(k.Val) + int(AANODE_SIZE)
+				aa.nodes--
 				deleted.Key = k.Key
 				deleted.Val = k.Val
 				deleted = nullNode

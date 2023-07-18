@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -48,6 +49,7 @@ func main() {
 		db.store.Close()
 		benchSeqGetKeyVals(db.store, numOps, 16)
 		benchRandGetKeyVals(db.store, numOps)
+		benchConcRandGetKeyVals(db.store, numOps)
 
 		fmt.Println()
 	}
@@ -70,7 +72,8 @@ func benchPutKeyVals(store KVStore, numOps, strSize int) {
 			panic(err)
 		}
 	}
-	fmt.Printf("\tbenchPutKeyVals: %s\n", time.Since(t))
+	fmt.Println("\tbenchPutKeyVals:")
+	fmt.Printf("\t\t%s\n", time.Since(t))
 	fmt.Printf("\t\t%.0f ops/s\n", float64(numOps)/time.Since(t).Seconds())
 }
 
@@ -82,7 +85,8 @@ func benchSeqGetKeyVals(store KVStore, numOps, strSize int) {
 			panic(err)
 		}
 	}
-	fmt.Printf("\tbenchSeqGetKeyVals: %s\n", time.Since(t))
+	fmt.Println("\tbenchSeqGetKeyVals:")
+	fmt.Printf("\t\t%s\n", time.Since(t))
 	fmt.Printf("\t\t%.0f ops/s\n", float64(numOps)/time.Since(t).Seconds())
 }
 
@@ -95,7 +99,25 @@ func benchRandGetKeyVals(store KVStore, numOps int) {
 			panic(err)
 		}
 	}
-	fmt.Printf("\tbenchRandGetKeyVals: %s\n", time.Since(t))
+	fmt.Println("\tbenchRandGetKeyVals:")
+	fmt.Printf("\t\t%s\n", time.Since(t))
+	fmt.Printf("\t\t%.0f ops/s\n", float64(numOps)/time.Since(t).Seconds())
+}
+
+func benchConcRandGetKeyVals(store KVStore, numOps int) {
+	t := time.Now()
+	var wg sync.WaitGroup
+	for i := 0; i < numOps; i++ {
+		idx := rand.Intn(numOps)
+		wg.Add(1)
+		go func() {
+			store.Get(fmt.Sprintf("key_%d", idx))
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+	fmt.Println("\tbenchConcRandGetKeyVals:")
+	fmt.Printf("\t\t%s\n", time.Since(t))
 	fmt.Printf("\t\t%.0f ops/s\n", float64(numOps)/time.Since(t).Seconds())
 }
 
