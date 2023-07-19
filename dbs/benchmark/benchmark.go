@@ -41,7 +41,7 @@ func main() {
 		},
 	}
 
-	numOps := 1000000 / 3
+	numOps := 1000000 / 2
 
 	for _, db := range dbs {
 		fmt.Printf("Benchmarks for %s\n", db.name)
