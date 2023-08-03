@@ -21,7 +21,7 @@ type BloomFilter struct {
 func NewBloomFilter(n int, dfp float64) (*BloomFilter, error) {
 	k, m := optimalKM(float64(n), dfp)
 	if k < 0 || m < 0 {
-		return nil, fmt.Errorf("unable to select k and m")
+		return nil, fmt.Errorf("unable to select k and m (n=%d, dfp=%.3f)", n, dfp)
 	}
 
 	bf := BloomFilter{

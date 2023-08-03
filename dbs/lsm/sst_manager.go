@@ -1,14 +1,20 @@
 package lsm
 
 import (
+	"container/heap"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"sync"
+)
+
+const (
+	WR_FLAGS = os.O_APPEND | os.O_CREATE | os.O_WRONLY
 )
 
 type SSTManager struct {
@@ -36,7 +42,7 @@ type SSTable struct {
 	ID       int
 	FileSize int
 
-	Meta        Meta
+	Meta        *Meta
 	Index       *SparseIndex
 	BloomFilter *BloomFilter
 	DataFile    io.ReaderAt
@@ -61,23 +67,19 @@ func (sm *SSTManager) Add(mt Memtable) error {
 	sm.ssCounter++
 	sm.mu.Unlock()
 
-	// TODO: generalize this.
-	metaPath := filepath.Join(sm.dir, fmt.Sprintf("lsm-%d.meta", curCounter))
 	dataPath := filepath.Join(sm.dir, fmt.Sprintf("lsm-%d.data", curCounter))
-	indexPath := filepath.Join(sm.dir, fmt.Sprintf("lsm-%d.index", curCounter))
-	bloomPath := filepath.Join(sm.dir, fmt.Sprintf("lsm-%d.bloom", curCounter))
-
-	dataFile, err := os.OpenFile(dataPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	dataFile, err := os.OpenFile(dataPath, WR_FLAGS, 0644)
 	if err != nil {
 		return fmt.Errorf("unable to flush: %w", err)
 	}
 	defer dataFile.Close()
 
-	sparseIndex := NewSparseIndex()
+	si := NewSparseIndex()
 	bf, err := NewBloomFilter(mt.Nodes(), sm.errorPct)
 	if err != nil {
 		return fmt.Errorf("unable to create bloom filter: %w", err)
 	}
+	meta := &Meta{Items: mt.Nodes()}
 
 	offset := 0
 	iter := 0
@@ -92,28 +94,14 @@ func (sm *SSTManager) Add(mt Memtable) error {
 		bf.Add([]byte(k))
 
 		if iter%sm.sparseness == 0 {
-			sparseIndex.Append(recordOffset{
-				Key:    k,
-				Offset: offset,
-			})
+			si.Append(recordOffset{Key: k, Offset: offset})
 		}
 
 		offset += kn + vn
 		iter++
 	})
 
-	if err = sparseIndex.Encode(indexPath); err != nil {
-		return fmt.Errorf("unable to flush sparse index: %w", err)
-	}
-
-	if err = bf.Encode(bloomPath); err != nil {
-		return fmt.Errorf("unable to flush bloom filter: %w", err)
-	}
-
-	meta := Meta{}
-	if err := meta.Encode(metaPath); err != nil {
-		return fmt.Errorf("unable to flush metadata: %w", err)
-	}
+	encodeFiles(sm.dir, curCounter, meta, si, bf)
 
 	dataFile, err = os.Open(dataPath)
 	if err != nil {
@@ -124,7 +112,8 @@ func (sm *SSTManager) Add(mt Memtable) error {
 	sm.ssTables[0] = append(sm.ssTables[0], SSTable{
 		ID:          curCounter,
 		FileSize:    offset,
-		Index:       sparseIndex,
+		Meta:        meta,
+		Index:       si,
 		BloomFilter: bf,
 		DataFile:    dataFile,
 	})
@@ -159,7 +148,7 @@ func (sm *SSTManager) Load() error {
 	}
 
 	for i := range ssFiles.dataFiles {
-		var meta Meta
+		meta := &Meta{}
 		if err := meta.Decode(ssFiles.metaFiles[i]); err != nil {
 			return fmt.Errorf("unable to open meta file: %w", err)
 		}
@@ -205,9 +194,128 @@ func (sm *SSTManager) Load() error {
 	return nil
 }
 
+func (sm *SSTManager) Compact() {
+	sm.mu.Lock()
+	if len(sm.ssTables[0]) > 0 {
+		newID := sm.ssCounter
+		sm.ssCounter++
+		sm.mu.Unlock()
+
+		sm.mu.RLock()
+		table := sm.compactTables(newID, sm.ssTables[0])
+		sm.mu.RUnlock()
+
+		sm.mu.Lock()
+		// Lock and make updates to table.
+		if len(sm.ssTables) <= table.Meta.Level {
+			sm.ssTables = append(sm.ssTables, make([]SSTable, 0))
+		}
+		sm.ssTables[table.Meta.Level] = append(
+			[]SSTable{table},
+			sm.ssTables[table.Meta.Level]...,
+		)
+		sm.mu.Unlock()
+
+		return
+	}
+	sm.mu.Unlock()
+}
+
+// compactTables require
+func (sm *SSTManager) compactTables(newID int, tables []SSTable) SSTable {
+	kfh := make(KeyFileHeap, len(tables))
+	level := tables[0].Meta.Level
+	totalItems := 0
+
+	for i, t := range tables {
+		kvp, offset, _ := readKeyValue(t.DataFile, 0)
+		kfh[i] = KeyFile{
+			Key:    string(kvp.key),
+			Value:  kvp.value,
+			File:   i, // NOTE: this file does not represent the FileID.
+			Offset: int(offset),
+		}
+		totalItems += t.Meta.Items
+	}
+	heap.Init(&kfh)
+
+	dataPath := filepath.Join(sm.dir, fmt.Sprintf("lsm-%d.data", newID))
+	dataFile, err := os.OpenFile(dataPath, WR_FLAGS, 0644)
+	if err != nil {
+		panic(fmt.Errorf("unable to flush: %w", err))
+	}
+	defer dataFile.Close()
+
+	si := NewSparseIndex()
+	bf, err := NewBloomFilter(totalItems, sm.errorPct)
+	if err != nil {
+		panic(fmt.Errorf("unable to create bloom filter: %w", err))
+	}
+	meta := &Meta{Level: level + 1, Items: totalItems}
+
+	sparseness := int(math.Pow(float64(sm.sparseness), float64(level+2)))
+
+	offset := 0
+	iter := 0
+	for len(kfh) > 0 {
+		kf := heap.Pop(&kfh).(KeyFile)
+
+		if iter%sparseness == 0 {
+			si.Append(recordOffset{Key: string(kf.Key), Offset: offset})
+		}
+
+		kl, _ := flushBytes(dataFile, []byte(kf.Key))
+		vl, _ := flushBytes(dataFile, kf.Value)
+		bf.Add([]byte(kf.Key))
+
+		if kf.Offset >= tables[kf.File].FileSize {
+			continue
+		}
+
+		kvp, newOffset, _ := readKeyValue(
+			tables[kf.File].DataFile,
+			int64(kf.Offset),
+		)
+
+		offset += kl + vl
+		iter++
+
+		heap.Push(&kfh, KeyFile{
+			Key:    string(kvp.key),
+			File:   kf.File,
+			Offset: int(newOffset),
+		})
+	}
+
+	err = encodeFiles(sm.dir, newID, meta, si, bf)
+	if err != nil {
+		panic(err)
+	}
+
+	for _, t := range tables {
+		pattern := filepath.Join(sm.dir, fmt.Sprintf("lsm-%d.*", t.ID))
+		toRemove, err := filepath.Glob(pattern)
+		if err != nil {
+			panic(err)
+		}
+		for _, f := range toRemove {
+			os.Remove(f)
+		}
+	}
+
+	return SSTable{
+		ID:          newID,
+		FileSize:    offset,
+		Meta:        meta,
+		Index:       si,
+		BloomFilter: bf,
+		DataFile:    dataFile,
+	}
+}
+
 // findInSSTable expects caller to acquire read lock on SSTables.
 func findInSSTable(ss SSTable, key string) ([]byte, bool, error) {
-	if !ss.BloomFilter.In([]byte(key)) {
+	if ss.BloomFilter != nil && !ss.BloomFilter.In([]byte(key)) {
 		return nil, false, nil
 	}
 
@@ -237,6 +345,24 @@ type ssFiles struct {
 	dataFiles  []string
 	indexFiles []string
 	bloomFiles []string
+}
+
+func encodeFiles(dir string, id int, meta *Meta, si *SparseIndex, bf *BloomFilter) error {
+	metaPath := filepath.Join(dir, fmt.Sprintf("lsm-%d.meta", id))
+	indexPath := filepath.Join(dir, fmt.Sprintf("lsm-%d.index", id))
+	bloomPath := filepath.Join(dir, fmt.Sprintf("lsm-%d.bloom", id))
+
+	if err := si.Encode(indexPath); err != nil {
+		return fmt.Errorf("unable to flush sparse index: %w", err)
+	}
+	if err := bf.Encode(bloomPath); err != nil {
+		return fmt.Errorf("unable to flush bloom filter: %w", err)
+	}
+	if err := meta.Encode(metaPath); err != nil {
+		return fmt.Errorf("unable to flush metadata: %w", err)
+	}
+
+	return nil
 }
 
 func getFiles(dir string) (ssFiles, error) {

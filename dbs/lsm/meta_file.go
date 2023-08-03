@@ -8,6 +8,7 @@ import (
 
 type Meta struct {
 	Level int
+	Items int
 }
 
 func (m *Meta) Encode(filename string) error {
@@ -36,5 +37,7 @@ func (m *Meta) Decode(filename string) error {
 	if err != nil {
 		return fmt.Errorf("unable to decode bloom filter: %w", err)
 	}
+	*m = nm
+
 	return nil
 }

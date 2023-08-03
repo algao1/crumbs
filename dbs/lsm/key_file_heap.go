@@ -2,6 +2,7 @@ package lsm
 
 type KeyFile struct {
 	Key    string
+	Value  []byte
 	File   int
 	Offset int
 }

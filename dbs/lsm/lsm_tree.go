@@ -16,7 +16,6 @@ const (
 )
 
 // TODO:
-// - add compaction
 // - add a WAL
 // - add better logging
 
@@ -109,6 +108,10 @@ func (lt *LSMTree) Close() error {
 	}
 	lt.tables = []Memtable{NewAATree()}
 	return nil
+}
+
+func (lt *LSMTree) Compact() {
+	lt.stm.Compact()
 }
 
 func (lt *LSMTree) flushPeriodically() {
