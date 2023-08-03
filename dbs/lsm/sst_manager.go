@@ -2,9 +2,11 @@ package lsm
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"sync"
 )
@@ -16,6 +18,10 @@ type SSTManager struct {
 	ssTables  [][]SSTable
 	ssCounter int
 
+	// // set to false when under compaction.
+	// writeable bool
+	// writeMu   sync.RWMutex
+
 	// options.
 	sparseness int
 	errorPct   float64
@@ -24,6 +30,16 @@ type SSTManager struct {
 type SSTMOptions struct {
 	sparseness int
 	errorPct   float64
+}
+
+type SSTable struct {
+	ID       int
+	FileSize int
+
+	Meta        Meta
+	Index       *SparseIndex
+	BloomFilter *BloomFilter
+	DataFile    io.ReaderAt
 }
 
 func NewSSTManager(dir string, opts SSTMOptions) *SSTManager {
@@ -41,11 +57,15 @@ func NewSSTManager(dir string, opts SSTMOptions) *SSTManager {
 // that the memtable is not the active (most recent) memtable.
 func (sm *SSTManager) Add(mt Memtable) error {
 	sm.mu.Lock()
-	dataPath := filepath.Join(sm.dir, fmt.Sprintf("lsm-%d.data", sm.ssCounter))
-	indexPath := filepath.Join(sm.dir, fmt.Sprintf("lsm-%d.index", sm.ssCounter))
-	bloomPath := filepath.Join(sm.dir, fmt.Sprintf("lsm-%d.bloom", sm.ssCounter))
+	curCounter := sm.ssCounter
 	sm.ssCounter++
 	sm.mu.Unlock()
+
+	// TODO: generalize this.
+	metaPath := filepath.Join(sm.dir, fmt.Sprintf("lsm-%d.meta", curCounter))
+	dataPath := filepath.Join(sm.dir, fmt.Sprintf("lsm-%d.data", curCounter))
+	indexPath := filepath.Join(sm.dir, fmt.Sprintf("lsm-%d.index", curCounter))
+	bloomPath := filepath.Join(sm.dir, fmt.Sprintf("lsm-%d.bloom", curCounter))
 
 	dataFile, err := os.OpenFile(dataPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
@@ -58,9 +78,9 @@ func (sm *SSTManager) Add(mt Memtable) error {
 	if err != nil {
 		return fmt.Errorf("unable to create bloom filter: %w", err)
 	}
+
 	offset := 0
 	iter := 0
-
 	mt.Traverse(func(k string, v []byte) {
 		if len(v) == 0 {
 			return
@@ -90,6 +110,11 @@ func (sm *SSTManager) Add(mt Memtable) error {
 		return fmt.Errorf("unable to flush bloom filter: %w", err)
 	}
 
+	meta := Meta{}
+	if err := meta.Encode(metaPath); err != nil {
+		return fmt.Errorf("unable to flush metadata: %w", err)
+	}
+
 	dataFile, err = os.Open(dataPath)
 	if err != nil {
 		return fmt.Errorf("unable to open data file: %w", err)
@@ -97,6 +122,7 @@ func (sm *SSTManager) Add(mt Memtable) error {
 
 	sm.mu.Lock()
 	sm.ssTables[0] = append(sm.ssTables[0], SSTable{
+		ID:          curCounter,
 		FileSize:    offset,
 		Index:       sparseIndex,
 		BloomFilter: bf,
@@ -133,6 +159,11 @@ func (sm *SSTManager) Load() error {
 	}
 
 	for i := range ssFiles.dataFiles {
+		var meta Meta
+		if err := meta.Decode(ssFiles.metaFiles[i]); err != nil {
+			return fmt.Errorf("unable to open meta file: %w", err)
+		}
+
 		df, err := os.Open(ssFiles.dataFiles[i])
 		if err != nil {
 			return fmt.Errorf("unable to open data file: %w", err)
@@ -144,18 +175,20 @@ func (sm *SSTManager) Load() error {
 		}
 
 		sparseIndex := NewSparseIndex()
-		err = sparseIndex.Decode(ssFiles.indexFiles[i])
-		if err != nil {
+		if err = sparseIndex.Decode(ssFiles.indexFiles[i]); err != nil {
 			return fmt.Errorf("unable to decode sparse index: %w", err)
 		}
 
 		bf, _ := NewBloomFilter(1, 1)
-		err = bf.Decode(ssFiles.bloomFiles[i])
-		if err != nil {
+		if err = bf.Decode(ssFiles.bloomFiles[i]); err != nil {
 			return fmt.Errorf("unable to decode bloom filter: %w", err)
 		}
 
-		sm.ssTables[0] = append(sm.ssTables[0], SSTable{
+		for meta.Level >= len(sm.ssTables) {
+			sm.ssTables = append(sm.ssTables, make([]SSTable, 0))
+		}
+		sm.ssTables[meta.Level] = append(sm.ssTables[meta.Level], SSTable{
+			ID:          ssFiles.ids[i],
 			FileSize:    int(fi.Size()),
 			DataFile:    df,
 			Index:       sparseIndex,
@@ -167,15 +200,7 @@ func (sm *SSTManager) Load() error {
 	if n == 0 {
 		return nil
 	}
-
-	// TODO: move to own function.
-	re := regexp.MustCompile(`\d+`)
-	match := re.FindString(ssFiles.dataFiles[n-1])
-	ssCounter, err := strconv.Atoi(match)
-	if err != nil {
-		return fmt.Errorf("could not get latest ss id: %w", err)
-	}
-	sm.ssCounter = ssCounter + 1
+	sm.ssCounter = ssFiles.ids[len(ssFiles.ids)-1] + 1
 
 	return nil
 }
@@ -191,23 +216,15 @@ func findInSSTable(ss SSTable, key string) ([]byte, bool, error) {
 		maxOffset = ss.FileSize
 	}
 
-	const i64Size = 8
-
 	for offset < maxOffset {
-		kb, err := readBytes(ss.DataFile, int64(offset))
+		kvp, newOffset, err := readKeyValue(ss.DataFile, int64(offset))
 		if err != nil {
-			return nil, false, fmt.Errorf("unable to read bytes: %w", err)
+			return nil, false, fmt.Errorf("unable to find in SSTable: %w", err)
 		}
-		offset += i64Size + len(kb)
+		offset = int(newOffset)
 
-		vb, err := readBytes(ss.DataFile, int64(offset))
-		if err != nil {
-			return nil, false, fmt.Errorf("unable to read bytes: %w", err)
-		}
-		offset += i64Size + len(vb)
-
-		if key == string(kb) {
-			return vb, true, nil
+		if key == string(kvp.key) {
+			return kvp.value, true, nil
 		}
 	}
 
@@ -215,30 +232,52 @@ func findInSSTable(ss SSTable, key string) ([]byte, bool, error) {
 }
 
 type ssFiles struct {
+	ids        []int
+	metaFiles  []string
 	dataFiles  []string
 	indexFiles []string
 	bloomFiles []string
 }
 
 func getFiles(dir string) (ssFiles, error) {
-	dataFiles, err := filepath.Glob(filepath.Join(dir, "lsm-*.data"))
+	metaFiles, err := filepath.Glob(filepath.Join(dir, "lsm-*.meta"))
 	if err != nil {
-		return ssFiles{}, fmt.Errorf("unable to glob data files: %w", err)
+		return ssFiles{}, fmt.Errorf("unable to glob meta files: %w", err)
 	}
 
-	indexFiles, err := filepath.Glob(filepath.Join(dir, "lsm-*.index"))
-	if err != nil {
-		return ssFiles{}, fmt.Errorf("unable to glob index files: %w", err)
-	}
+	dataFiles := make([]string, len(metaFiles))
+	indexFiles := make([]string, len(metaFiles))
+	bloomFiles := make([]string, len(metaFiles))
 
-	bloomFiles, err := filepath.Glob(filepath.Join(dir, "lsm-*.bloom"))
-	if err != nil {
-		return ssFiles{}, fmt.Errorf("unable to glob bloom files: %w", err)
+	sortedIDs := getSortedFileIDs(metaFiles)
+	for i, id := range sortedIDs {
+		metaFiles[i] = filepath.Join(dir, fmt.Sprintf("lsm-%d.meta", id))
+		dataFiles[i] = filepath.Join(dir, fmt.Sprintf("lsm-%d.data", id))
+		indexFiles[i] = filepath.Join(dir, fmt.Sprintf("lsm-%d.index", id))
+		bloomFiles[i] = filepath.Join(dir, fmt.Sprintf("lsm-%d.bloom", id))
 	}
 
 	return ssFiles{
+		ids:        sortedIDs,
+		metaFiles:  metaFiles,
 		dataFiles:  dataFiles,
 		indexFiles: indexFiles,
 		bloomFiles: bloomFiles,
 	}, nil
+}
+
+func getSortedFileIDs(files []string) []int {
+	fileIDs := make([]int, len(files))
+	for i, df := range files {
+		fileIDs[i] = getFileID(df)
+	}
+	sort.Ints(fileIDs)
+	return fileIDs
+}
+
+func getFileID(file string) int {
+	re := regexp.MustCompile("[0-9]+")
+	match := re.FindString(file)
+	id, _ := strconv.Atoi(match)
+	return id
 }

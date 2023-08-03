@@ -47,3 +47,28 @@ func readBytes(file io.ReaderAt, offset int64) ([]byte, error) {
 
 	return b, nil
 }
+
+type keyValue struct {
+	key   []byte
+	value []byte
+}
+
+const (
+	I64Size = 8
+)
+
+func readKeyValue(file io.ReaderAt, offset int64) (keyValue, int64, error) {
+	kb, err := readBytes(file, offset)
+	if err != nil {
+		return keyValue{}, -1, fmt.Errorf("unable to read bytes: %w", err)
+	}
+	offset += I64Size + int64(len(kb))
+
+	vb, err := readBytes(file, offset)
+	if err != nil {
+		return keyValue{}, -1, fmt.Errorf("unable to read bytes: %w", err)
+	}
+	offset += I64Size + int64(len(vb))
+
+	return keyValue{key: kb, value: vb}, offset, nil
+}

@@ -80,9 +80,12 @@ func benchPutKeyVals(store KVStore, numOps, strSize int) {
 func benchSeqGetKeyVals(store KVStore, numOps, strSize int) {
 	t := time.Now()
 	for i := 0; i < numOps; i++ {
-		_, err := store.Get(fmt.Sprintf("key_%d", i))
+		v, err := store.Get(fmt.Sprintf("key_%d", i))
 		if err != nil {
 			panic(err)
+		}
+		if string(v) != fmt.Sprintf("val_%d", i) {
+			panic("incorrect value found")
 		}
 	}
 	fmt.Println("\tbenchSeqGetKeyVals:")

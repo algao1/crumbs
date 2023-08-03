@@ -2,7 +2,6 @@ package lsm
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"sync"
 	"time"
@@ -35,13 +34,6 @@ type Memtable interface {
 	Traverse(f func(k string, v []byte))
 	Size() int
 	Nodes() int
-}
-
-type SSTable struct {
-	FileSize    int
-	Index       *SparseIndex
-	BloomFilter *BloomFilter
-	DataFile    io.ReaderAt
 }
 
 func NewLSMTree(dir string, options ...LSMOption) (*LSMTree, error) {
@@ -140,8 +132,7 @@ func (lt *LSMTree) flushPeriodically() {
 			for _, mt := range mts {
 				err := lt.stm.Add(mt)
 				if err != nil {
-					// TODO: make this better.
-					fmt.Println("failed to flush periodically", err)
+					panic(fmt.Errorf("failed to flush periodically: %w", err))
 				}
 			}
 
