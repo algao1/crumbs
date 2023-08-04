@@ -1,10 +1,10 @@
 package lsm
 
 type KeyFile struct {
-	Key    string
-	Value  []byte
-	File   int
-	Offset int
+	Key     string
+	Value   []byte
+	FileIdx int
+	Offset  int
 }
 
 type KeyFileHeap []KeyFile
@@ -15,7 +15,7 @@ func (h KeyFileHeap) Len() int {
 
 func (h KeyFileHeap) Less(i, j int) bool {
 	if h[i].Key == h[j].Key {
-		return h[i].File < h[j].File
+		return h[i].FileIdx < h[j].FileIdx
 	}
 	return h[i].Key < h[j].Key
 }

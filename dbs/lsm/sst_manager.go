@@ -279,10 +279,10 @@ func (sm *SSTManager) compactTables(newID int, tables []SSTable) SSTable {
 	for i, t := range tables {
 		kvp, offset, _ := readKeyValue(t.DataFile, 0)
 		kfh[i] = KeyFile{
-			Key:    string(kvp.key),
-			Value:  kvp.value,
-			File:   i, // NOTE: this file does not represent the FileID.
-			Offset: int(offset),
+			Key:     string(kvp.key),
+			Value:   kvp.value,
+			FileIdx: i, // NOTE: this file does not represent the FileID.
+			Offset:  int(offset),
 		}
 		totalItems += t.Meta.Items
 	}
@@ -319,12 +319,12 @@ func (sm *SSTManager) compactTables(newID int, tables []SSTable) SSTable {
 		vl, _ := flushBytes(dataFile, kf.Value)
 		bf.Add([]byte(kf.Key))
 
-		if kf.Offset >= tables[kf.File].FileSize {
+		if kf.Offset >= tables[kf.FileIdx].FileSize {
 			continue
 		}
 
 		kvp, newOffset, _ := readKeyValue(
-			tables[kf.File].DataFile,
+			tables[kf.FileIdx].DataFile,
 			int64(kf.Offset),
 		)
 
@@ -332,9 +332,9 @@ func (sm *SSTManager) compactTables(newID int, tables []SSTable) SSTable {
 		iter++
 
 		heap.Push(&kfh, KeyFile{
-			Key:    string(kvp.key),
-			File:   kf.File,
-			Offset: int(newOffset),
+			Key:     string(kvp.key),
+			FileIdx: kf.FileIdx,
+			Offset:  int(newOffset),
 		})
 	}
 
