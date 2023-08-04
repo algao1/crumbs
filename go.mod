@@ -30,6 +30,7 @@ require (
 	github.com/mattn/go-isatty v0.0.12 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
+	golang.org/x/exp v0.0.0-20230801115018-d63ba01acd4b
 	golang.org/x/net v0.8.0 // indirect
 	golang.org/x/sys v0.6.0 // indirect
 	golang.org/x/text v0.8.0 // indirect

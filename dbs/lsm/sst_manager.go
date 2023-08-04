@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+
+	"golang.org/x/exp/slog"
 )
 
 const (
@@ -20,13 +22,14 @@ const (
 type SSTManager struct {
 	mu sync.RWMutex
 
+	writeMu   sync.RWMutex
+	writeable bool
+
 	dir       string
 	ssTables  [][]SSTable
 	ssCounter int
 
-	// // set to false when under compaction.
-	// writeable bool
-	// writeMu   sync.RWMutex
+	logger *slog.Logger
 
 	// options.
 	sparseness int
@@ -48,12 +51,14 @@ type SSTable struct {
 	DataFile    io.ReaderAt
 }
 
-func NewSSTManager(dir string, opts SSTMOptions) *SSTManager {
+func NewSSTManager(dir string, logger *slog.Logger, opts SSTMOptions) *SSTManager {
 	sm := &SSTManager{
 		dir:        dir,
 		ssTables:   make([][]SSTable, 1),
+		writeable:  true,
 		sparseness: opts.sparseness,
 		errorPct:   opts.errorPct,
+		logger:     logger,
 	}
 	sm.ssTables[0] = make([]SSTable, 0)
 	return sm
@@ -62,6 +67,13 @@ func NewSSTManager(dir string, opts SSTMOptions) *SSTManager {
 // Add adds and writes a memtable to disk as a SSTable. Requires
 // that the memtable is not the active (most recent) memtable.
 func (sm *SSTManager) Add(mt Memtable) error {
+	sm.writeMu.RLock()
+	if !sm.writeable {
+		sm.writeMu.RUnlock()
+		return InProgressError{}
+	}
+	sm.writeMu.RUnlock()
+
 	sm.mu.Lock()
 	curCounter := sm.ssCounter
 	sm.ssCounter++
@@ -194,6 +206,14 @@ func (sm *SSTManager) Load() error {
 	return nil
 }
 
+// Compact calls a more fine-grained compactTables under the hood.
+// It must ensure that
+//   - the SSTable counter is properly updated
+//   - that writeable is set to false so sm.Add operations will fail
+//
+// We only acquire RLock during compaction to allow for concurrent reads.
+// Once we are finished, we acquire a lock to first add the new table,
+// then remove stale tables.
 func (sm *SSTManager) Compact() {
 	sm.mu.Lock()
 	if len(sm.ssTables[0]) > 0 {
@@ -201,27 +221,54 @@ func (sm *SSTManager) Compact() {
 		sm.ssCounter++
 		sm.mu.Unlock()
 
+		sm.logger.Info("compaction in progress")
+
+		sm.writeMu.Lock()
+		sm.writeable = false
+		sm.writeMu.Unlock()
+		defer func() {
+			sm.writeMu.Lock()
+			sm.writeable = true
+			sm.writeMu.Unlock()
+		}()
+
 		sm.mu.RLock()
-		table := sm.compactTables(newID, sm.ssTables[0])
+		toCompact := sm.ssTables[0]
+		newTable := sm.compactTables(newID, toCompact)
 		sm.mu.RUnlock()
 
-		sm.mu.Lock()
 		// Lock and make updates to table.
-		if len(sm.ssTables) <= table.Meta.Level {
+		sm.mu.Lock()
+		if len(sm.ssTables) <= newTable.Meta.Level {
 			sm.ssTables = append(sm.ssTables, make([]SSTable, 0))
 		}
-		sm.ssTables[table.Meta.Level] = append(
-			[]SSTable{table},
-			sm.ssTables[table.Meta.Level]...,
+		sm.ssTables[newTable.Meta.Level] = append(
+			[]SSTable{newTable},
+			sm.ssTables[newTable.Meta.Level]...,
 		)
+
+		for _, t := range toCompact {
+			pattern := filepath.Join(sm.dir, fmt.Sprintf("lsm-%d.*", t.ID))
+			toRemove, err := filepath.Glob(pattern)
+			if err != nil {
+				panic(err)
+			}
+			for _, f := range toRemove {
+				os.Remove(f)
+			}
+		}
 		sm.mu.Unlock()
 
+		sm.logger.Info(
+			"compaction finished",
+			"tablesCompacted", len(toCompact),
+			"newTableLevel", newTable.Meta.Level,
+		)
 		return
 	}
 	sm.mu.Unlock()
 }
 
-// compactTables require
 func (sm *SSTManager) compactTables(newID int, tables []SSTable) SSTable {
 	kfh := make(KeyFileHeap, len(tables))
 	level := tables[0].Meta.Level
@@ -290,17 +337,6 @@ func (sm *SSTManager) compactTables(newID int, tables []SSTable) SSTable {
 	err = encodeFiles(sm.dir, newID, meta, si, bf)
 	if err != nil {
 		panic(err)
-	}
-
-	for _, t := range tables {
-		pattern := filepath.Join(sm.dir, fmt.Sprintf("lsm-%d.*", t.ID))
-		toRemove, err := filepath.Glob(pattern)
-		if err != nil {
-			panic(err)
-		}
-		for _, f := range toRemove {
-			os.Remove(f)
-		}
 	}
 
 	return SSTable{
@@ -407,3 +443,10 @@ func getFileID(file string) int {
 	id, _ := strconv.Atoi(match)
 	return id
 }
+
+// See: https://dave.cheney.net/2014/12/24/inspecting-errors
+// Trying this pattern out to see if its any good.
+
+type InProgressError struct{}
+
+func (ip InProgressError) Error() string { return "in progress" }

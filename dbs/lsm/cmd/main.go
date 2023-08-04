@@ -8,7 +8,7 @@ import (
 )
 
 func main() {
-	// cleanUp()
+	cleanUp()
 
 	lt, err := lsm.NewLSMTree("cmd/data")
 	if err != nil {
