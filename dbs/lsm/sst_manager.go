@@ -207,9 +207,10 @@ func (sm *SSTManager) Load() error {
 }
 
 // Compact calls a more fine-grained compactTables under the hood.
-// It must ensure that
-//   - the SSTable counter is properly updated
-//   - that writeable is set to false so sm.Add operations will fail
+// After Compact is called, we guarantee that
+//   - the SSTable counter is incremented if compaction occurs
+//   - that writeable is set to false so sm.Add operations will raise
+//     the appropriate errors while compacting
 //
 // We only acquire RLock during compaction to allow for concurrent reads.
 // Once we are finished, we acquire a lock to first add the new table,
@@ -251,7 +252,8 @@ func (sm *SSTManager) Compact() {
 			pattern := filepath.Join(sm.dir, fmt.Sprintf("lsm-%d.*", t.ID))
 			toRemove, err := filepath.Glob(pattern)
 			if err != nil {
-				panic(err)
+				sm.logger.Error("unable to glob stale files", err)
+				continue
 			}
 			for _, f := range toRemove {
 				os.Remove(f)
@@ -289,14 +291,16 @@ func (sm *SSTManager) compactTables(newID int, tables []SSTable) SSTable {
 	dataPath := filepath.Join(sm.dir, fmt.Sprintf("lsm-%d.data", newID))
 	dataFile, err := os.OpenFile(dataPath, WR_FLAGS, 0644)
 	if err != nil {
-		panic(fmt.Errorf("unable to flush: %w", err))
+		sm.logger.Error("unable to open data file for compaction", err)
+		return SSTable{}
 	}
 	defer dataFile.Close()
 
 	si := NewSparseIndex()
 	bf, err := NewBloomFilter(totalItems, sm.errorPct)
 	if err != nil {
-		panic(fmt.Errorf("unable to create bloom filter: %w", err))
+		sm.logger.Error("unable to create bloom filter", err)
+		return SSTable{}
 	}
 	meta := &Meta{Level: level + 1, Items: totalItems}
 
@@ -336,7 +340,8 @@ func (sm *SSTManager) compactTables(newID int, tables []SSTable) SSTable {
 
 	err = encodeFiles(sm.dir, newID, meta, si, bf)
 	if err != nil {
-		panic(err)
+		sm.logger.Error("unable to encode compacted files", err)
+		return SSTable{}
 	}
 
 	return SSTable{

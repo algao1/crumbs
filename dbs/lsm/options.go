@@ -15,3 +15,17 @@ func WithErrorPct(pct float64) LSMOption {
 		return l
 	}
 }
+
+func WithMemTableSize(size int) LSMOption {
+	return func(l *LSMTree) *LSMTree {
+		l.memTableSize = size
+		return l
+	}
+}
+
+func WithMaxMemTables(max int) LSMOption {
+	return func(l *LSMTree) *LSMTree {
+		l.maxMemTables = max
+		return l
+	}
+}

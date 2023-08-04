@@ -11,16 +11,13 @@ import (
 )
 
 const (
-	MEM_TABLE_SIZE = 1024 * 1024 * 16 // 16 MB
-	MAX_MEM_TABLES = 2
-
-	DEFAULT_SPARSENESS = 16
-	DEFAULT_ERROR_PCT  = 0.05
+	DEFAULT_MEM_TABLE_SIZE = 1024 * 1024 * 16 // 16 MB
+	DEFAULT_MAX_MEM_TABLES = 4
+	DEFAULT_SPARSENESS     = 16
+	DEFAULT_ERROR_PCT      = 0.05
 )
 
 // TODO:
-// - add some better tests
-// - remove sketchy panics everywhere
 // - better compaction schemes
 // - add a WAL
 // - update README.md
@@ -28,8 +25,12 @@ const (
 type LSMTree struct {
 	mu sync.RWMutex
 
-	tables        []Memtable
-	stm           *SSTManager
+	tables []Memtable
+	stm    *SSTManager
+
+	memTableSize int
+	maxMemTables int
+
 	flusherCloser chan struct{}
 	logger        *slog.Logger
 }
@@ -54,6 +55,8 @@ func NewLSMTree(dir string, options ...LSMOption) (*LSMTree, error) {
 				errorPct:   DEFAULT_ERROR_PCT,
 			},
 		),
+		memTableSize:  DEFAULT_MEM_TABLE_SIZE,
+		maxMemTables:  DEFAULT_MAX_MEM_TABLES,
 		flusherCloser: make(chan struct{}),
 		logger:        logger,
 	}
@@ -81,7 +84,7 @@ func (lt *LSMTree) Put(key string, val []byte) {
 	curTable := lt.tables[len(lt.tables)-1]
 	curTable.Insert(key, val)
 
-	if curTable.Size() > MEM_TABLE_SIZE {
+	if curTable.Size() > DEFAULT_MEM_TABLE_SIZE {
 		curTable = NewAATree()
 		lt.tables = append(lt.tables, curTable)
 	}
@@ -108,9 +111,12 @@ func (lt *LSMTree) Delete(key string) {
 
 // Close flushes all memtables to disk.
 func (lt *LSMTree) Close() error {
-	lt.flusherCloser <- struct{}{}
 	// TODO: also stop compaction here.
+	lt.flusherCloser <- struct{}{}
+	return lt.FlushMemory()
+}
 
+func (lt *LSMTree) FlushMemory() error {
 	lt.mu.Lock()
 	defer lt.mu.Unlock()
 
@@ -121,6 +127,7 @@ func (lt *LSMTree) Close() error {
 		}
 	}
 	lt.tables = []Memtable{NewAATree()}
+
 	return nil
 }
 
@@ -138,8 +145,8 @@ func (lt *LSMTree) flushPeriodically() {
 			lt.mu.Lock()
 			n := len(lt.tables)
 			var mts []Memtable
-			if n > MAX_MEM_TABLES {
-				mts = lt.tables[:n-MAX_MEM_TABLES]
+			if n > DEFAULT_MAX_MEM_TABLES {
+				mts = lt.tables[:n-DEFAULT_MAX_MEM_TABLES]
 			} else {
 				lt.mu.Unlock()
 				continue
@@ -153,12 +160,13 @@ func (lt *LSMTree) flushPeriodically() {
 					continue
 				}
 				if err != nil {
-					panic(fmt.Errorf("failed to flush periodically: %w", err))
+					lt.logger.Warn("failed to flush periodically", "error", err)
+					continue
 				}
 			}
 
 			lt.mu.Lock()
-			lt.tables = lt.tables[n-MAX_MEM_TABLES:]
+			lt.tables = lt.tables[n-DEFAULT_MAX_MEM_TABLES:]
 			lt.mu.Unlock()
 		}
 	}
