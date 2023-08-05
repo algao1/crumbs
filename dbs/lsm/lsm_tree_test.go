@@ -127,23 +127,68 @@ func TestPutGetWhileCompactingSST(t *testing.T) {
 	assert.Empty(t, lt.stm.ssTables[0])
 }
 
-func TestSaveAndLoad(t *testing.T) {
-	lt, err := NewLSMTree(TEST_DIR)
+func TestProperlyCompactStale(t *testing.T) {
+	lt, err := NewLSMTree(TEST_DIR, WithMemTableSize(1024*1024))
 	assert.Nil(t, err)
 	defer cleanUp()
 
-	for i := 0; i < 500000; i++ {
+	const SKIP_RATIO = 5
+
+	for i := 0; i < 50000; i++ {
+		key := fmt.Sprintf("key_%d", i)
+		val := []byte(fmt.Sprintf("val_%d", i))
+		lt.Put(key, val)
+	}
+
+	for i := 0; i < 50000; i += SKIP_RATIO {
+		key := fmt.Sprintf("key_%d", i)
+		lt.Delete(key)
+	}
+
+	for i := 0; i < 10000; i++ {
+		key := fmt.Sprintf("key_%d", i)
+		val := []byte(fmt.Sprintf("new_val_%d", i))
+		lt.Put(key, val)
+	}
+
+	lt.FlushMemory()
+	lt.Compact()
+
+	for i := 0; i < 50000; i++ {
+		key := fmt.Sprintf("key_%d", i)
+		found, err := lt.Get(key)
+		assert.Nil(t, err)
+
+		if i < 10000 {
+			assert.Equal(t, fmt.Sprintf("new_val_%d", i), string(found), i)
+		} else if i%SKIP_RATIO == 0 {
+			assert.Equal(t, "", string(found), i)
+		} else {
+			assert.Equal(t, fmt.Sprintf("val_%d", i), string(found), i)
+		}
+	}
+}
+
+func TestSaveAndLoad(t *testing.T) {
+	lt, err := NewLSMTree(TEST_DIR, WithMemTableSize(1024*1024))
+	assert.Nil(t, err)
+	defer cleanUp()
+
+	for i := 0; i < 50000; i++ {
 		key := fmt.Sprintf("key_%d", i)
 		val := []byte(fmt.Sprintf("val_%d", i))
 		lt.Put(key, val)
 	}
 	assert.Nil(t, lt.Close())
 
+	lt.Compact()
+	lt.FlushMemory()
+
 	lt, err = NewLSMTree(TEST_DIR)
 	assert.Nil(t, err)
 	assert.NotEmpty(t, lt.stm.ssTables)
 
-	for i := 0; i < 500000; i++ {
+	for i := 0; i < 50000; i++ {
 		key := fmt.Sprintf("key_%d", i)
 		val := fmt.Sprintf("val_%d", i)
 		found, err := lt.Get(key)

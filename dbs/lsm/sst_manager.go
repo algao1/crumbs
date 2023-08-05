@@ -96,10 +96,6 @@ func (sm *SSTManager) Add(mt Memtable) error {
 	offset := 0
 	iter := 0
 	mt.Traverse(func(k string, v []byte) {
-		if len(v) == 0 {
-			return
-		}
-
 		// TODO: Maybe exit early on fail?
 		kn, _ := flushBytes(dataFile, []byte(k))
 		vn, _ := flushBytes(dataFile, v)
@@ -150,7 +146,7 @@ func (sm *SSTManager) Find(key string) ([]byte, error) {
 		}
 	}
 
-	return []byte{}, nil
+	return nil, nil
 }
 
 func (sm *SSTManager) Load() error {
@@ -234,6 +230,7 @@ func (sm *SSTManager) Compact() {
 		}()
 
 		sm.mu.RLock()
+		// TODO: temporary.
 		toCompact := sm.ssTables[0]
 		newTable := sm.compactTables(newID, toCompact)
 		sm.mu.RUnlock()
@@ -247,6 +244,8 @@ func (sm *SSTManager) Compact() {
 			[]SSTable{newTable},
 			sm.ssTables[newTable.Meta.Level]...,
 		)
+		// TODO: temporary.
+		sm.ssTables[0] = make([]SSTable, 0)
 		sm.mu.Unlock()
 
 		for _, t := range toCompact {
@@ -308,40 +307,62 @@ func (sm *SSTManager) compactTables(newID int, tables []SSTable) SSTable {
 
 	offset := 0
 	iter := 0
-	for len(kfh) > 0 {
-		kf := heap.Pop(&kfh).(KeyFile)
+	prevKeyFile := KeyFile{}
 
-		if iter%sparseness == 0 {
-			si.Append(recordOffset{Key: string(kf.Key), Offset: offset})
+	for len(kfh) > 0 {
+		keyFile := heap.Pop(&kfh).(KeyFile)
+
+		if keyFile.Key != prevKeyFile.Key && keyFile.Key != "" {
+			if iter%sparseness == 0 {
+				si.Append(recordOffset{
+					Key:    string(prevKeyFile.Key),
+					Offset: offset,
+				})
+			}
+
+			kl, _ := flushBytes(dataFile, []byte(prevKeyFile.Key))
+			vl, _ := flushBytes(dataFile, prevKeyFile.Value)
+			bf.Add([]byte(prevKeyFile.Key))
+
+			offset += kl + vl
+			iter++
 		}
 
-		kl, _ := flushBytes(dataFile, []byte(kf.Key))
-		vl, _ := flushBytes(dataFile, kf.Value)
-		bf.Add([]byte(kf.Key))
+		prevKeyFile = keyFile
 
-		if kf.Offset >= tables[kf.FileIdx].FileSize {
+		if keyFile.Offset >= tables[keyFile.FileIdx].FileSize {
 			continue
 		}
 
 		kvp, newOffset, _ := readKeyValue(
-			tables[kf.FileIdx].DataFile,
-			int64(kf.Offset),
+			tables[keyFile.FileIdx].DataFile,
+			int64(keyFile.Offset),
 		)
-
-		offset += kl + vl
-		iter++
 
 		heap.Push(&kfh, KeyFile{
 			Key:     string(kvp.key),
-			FileIdx: kf.FileIdx,
+			Value:   kvp.value,
+			FileIdx: keyFile.FileIdx,
 			Offset:  int(newOffset),
 		})
 	}
+
+	// We need to remember to do the last one.
+	kl, _ := flushBytes(dataFile, []byte(prevKeyFile.Key))
+	vl, _ := flushBytes(dataFile, prevKeyFile.Value)
+	bf.Add([]byte(prevKeyFile.Key))
+	offset += kl + vl
 
 	err = encodeFiles(sm.dir, newID, meta, si, bf)
 	if err != nil {
 		sm.logger.Error("unable to encode compacted files", err)
 		return SSTable{}
+	}
+
+	dataFile, err = os.Open(dataPath)
+	if err != nil {
+		sm.logger.Error("unable to open compacted dataFile for reading", err)
+		panic(err)
 	}
 
 	return SSTable{

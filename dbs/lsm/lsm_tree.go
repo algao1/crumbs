@@ -84,7 +84,7 @@ func (lt *LSMTree) Put(key string, val []byte) {
 	curTable := lt.tables[len(lt.tables)-1]
 	curTable.Insert(key, val)
 
-	if curTable.Size() > DEFAULT_MEM_TABLE_SIZE {
+	if curTable.Size() > lt.memTableSize {
 		curTable = NewAATree()
 		lt.tables = append(lt.tables, curTable)
 	}
@@ -145,8 +145,8 @@ func (lt *LSMTree) flushPeriodically() {
 			lt.mu.Lock()
 			n := len(lt.tables)
 			var mts []Memtable
-			if n > DEFAULT_MAX_MEM_TABLES {
-				mts = lt.tables[:n-DEFAULT_MAX_MEM_TABLES]
+			if n > lt.maxMemTables {
+				mts = lt.tables[:n-lt.maxMemTables]
 			} else {
 				lt.mu.Unlock()
 				continue
@@ -166,7 +166,7 @@ func (lt *LSMTree) flushPeriodically() {
 			}
 
 			lt.mu.Lock()
-			lt.tables = lt.tables[n-DEFAULT_MAX_MEM_TABLES:]
+			lt.tables = lt.tables[n-lt.maxMemTables:]
 			lt.mu.Unlock()
 		}
 	}
