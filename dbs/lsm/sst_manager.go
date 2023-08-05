@@ -247,6 +247,7 @@ func (sm *SSTManager) Compact() {
 			[]SSTable{newTable},
 			sm.ssTables[newTable.Meta.Level]...,
 		)
+		sm.mu.Unlock()
 
 		for _, t := range toCompact {
 			pattern := filepath.Join(sm.dir, fmt.Sprintf("lsm-%d.*", t.ID))
@@ -259,7 +260,6 @@ func (sm *SSTManager) Compact() {
 				os.Remove(f)
 			}
 		}
-		sm.mu.Unlock()
 
 		sm.logger.Info(
 			"compaction finished",

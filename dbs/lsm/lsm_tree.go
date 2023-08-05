@@ -157,11 +157,11 @@ func (lt *LSMTree) flushPeriodically() {
 				err := lt.stm.Add(mt)
 				if errors.Is(err, InProgressError{}) {
 					lt.logger.Debug("skipping periodic flush, compaction in progress")
-					continue
+					break
 				}
 				if err != nil {
 					lt.logger.Warn("failed to flush periodically", "error", err)
-					continue
+					break
 				}
 			}
 
