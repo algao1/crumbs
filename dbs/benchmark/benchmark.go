@@ -22,6 +22,7 @@ func main() {
 	// }
 	// defer pprof.StopCPUProfile()
 
+	defer cleanUp()
 	cleanUp()
 
 	dbs := []struct {

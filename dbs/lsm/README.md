@@ -45,11 +45,11 @@ benchConcRandGetKeyVals:
 
 ### Writes
 
-The DB contains a list of memtables (an ordered map implementation) that is stored in memory. When a write occurs, the key-value pair is inserted into the newest memtable. If the memtable is full (exceeds a certain threshold), a new memtable is rotated in.
+The DB contains a list of **memtables** (an ordered map implementation) that is stored in memory. When a write occurs, the key-value pair is inserted into the newest memtable. If the memtable is full (exceeds a certain threshold), a new memtable is rotated in.
 
 Older memtables are considered immutable, and are read-only. Having multiple memtables ensures that we can flush (write them to disk) in background processes without blocking writes.
 
-When a memtable is flushed, the data is written as a SSTable (sorted string table), a continuous series of records in sorted order. Alongside that, we also create a **sparse index** and **bloom filter** to speed up read operations.
+When a memtable is flushed, the data is written as a **SSTable** (sorted string table), a continuous series of records in sorted order. Alongside that, we also create a **sparse index** and **bloom filter** to speed up read operations.
 
 > In my implementation, memtables to be flushed are passed to SSTManager which does the described operations of writing to disk and creating the sparse index and bloom filter.
 
@@ -73,12 +73,22 @@ This property is useful when we need to traverse across SSTables to look a for a
 
 ### Reads
 
-<!-- TODO: -->
+Reads will proceed by checking first the memtables, then the SSTables in reverse chronological order. It stops only when it finds a key entry in a given table, or it has iterated across every single table.
 
-### Concurrency
+For SSTables, it does this by getting a lower and upper bound that the record *might* exists within for a given table, and then iterating over the range. Naturally, if we had to do this for every single table on disk, it would be very slow. So instead we use a bloom filter to skip tables, and reduce the number of times we have to check.
 
-<!-- TODO: -->
+<!-- TODO: Insert diagram here. -->
 
 ### Compaction
 
+Currently, the compaction process uses a **very simple** compaction scheme, which when triggered, compresses every SSTable in the first level into one single large table in the second table. This table is inserted at the front of the next layer to preserve reverse chronological ordering.
+
 See this detailed [paper](https://arxiv.org/pdf/2202.04522.pdf) on various compaction designs.
+
+### Concurrency
+
+One of my goals for this implementation, was to support non-blocking compaction, meaning reads and writes can still be executed while the database compacts tables in level 0 to level 1.
+
+> It does this by minimizing the amount of time the caller holds the mutex.
+
+<!-- TODO: Insert diagram here. -->
