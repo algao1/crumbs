@@ -87,20 +87,6 @@ func TestPutGetDel(t *testing.T) {
 	}
 }
 
-func TestAddWhileCompactingSST(t *testing.T) {
-	lt, err := NewLSMTree(TEST_DIR)
-	assert.Nil(t, err)
-	defer cleanUp()
-
-	// Ad-hoc, mock of "compacting".
-	lt.stm.mu.RLock()
-	defer lt.stm.mu.RUnlock()
-	lt.stm.writeable = false
-
-	err = lt.stm.Add(nil)
-	assert.ErrorIs(t, err, InProgressError{})
-}
-
 func TestPutGetWhileCompactingSST(t *testing.T) {
 	lt, err := NewLSMTree(TEST_DIR)
 	assert.Nil(t, err)
@@ -109,7 +95,6 @@ func TestPutGetWhileCompactingSST(t *testing.T) {
 	// Ad-hoc, mock of "compacting".
 	lt.stm.mu.RLock()
 	defer lt.stm.mu.RUnlock()
-	lt.stm.writeable = false
 
 	for i := 0; i < 500000; i++ {
 		key := fmt.Sprintf("key_%d", i)

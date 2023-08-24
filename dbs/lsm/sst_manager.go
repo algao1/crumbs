@@ -22,9 +22,6 @@ const (
 type SSTManager struct {
 	mu sync.RWMutex
 
-	writeMu   sync.RWMutex
-	writeable bool
-
 	dir       string
 	ssTables  [][]SSTable
 	ssCounter int
@@ -55,7 +52,6 @@ func NewSSTManager(dir string, logger *slog.Logger, opts SSTMOptions) *SSTManage
 	sm := &SSTManager{
 		dir:        dir,
 		ssTables:   make([][]SSTable, 1),
-		writeable:  true,
 		sparseness: opts.sparseness,
 		errorPct:   opts.errorPct,
 		logger:     logger,
@@ -67,13 +63,6 @@ func NewSSTManager(dir string, logger *slog.Logger, opts SSTMOptions) *SSTManage
 // Add adds and writes a memtable to disk as a SSTable. Requires
 // that the memtable is not the active (most recent) memtable.
 func (sm *SSTManager) Add(mt Memtable) error {
-	sm.writeMu.RLock()
-	if !sm.writeable {
-		sm.writeMu.RUnlock()
-		return InProgressError{}
-	}
-	sm.writeMu.RUnlock()
-
 	sm.mu.Lock()
 	curCounter := sm.ssCounter
 	sm.ssCounter++
@@ -219,15 +208,6 @@ func (sm *SSTManager) Compact() {
 		sm.mu.Unlock()
 
 		sm.logger.Info("compaction in progress")
-
-		sm.writeMu.Lock()
-		sm.writeable = false
-		sm.writeMu.Unlock()
-		defer func() {
-			sm.writeMu.Lock()
-			sm.writeable = true
-			sm.writeMu.Unlock()
-		}()
 
 		sm.mu.RLock()
 		// TODO: temporary.

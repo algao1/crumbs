@@ -1,7 +1,6 @@
 package lsm
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -155,10 +154,6 @@ func (lt *LSMTree) flushPeriodically() {
 
 			for _, mt := range mts {
 				err := lt.stm.Add(mt)
-				if errors.Is(err, InProgressError{}) {
-					lt.logger.Debug("skipping periodic flush, compaction in progress")
-					break
-				}
 				if err != nil {
 					lt.logger.Warn("failed to flush periodically", "error", err)
 					break
