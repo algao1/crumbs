@@ -312,7 +312,7 @@ func (sm *SSTManager) compactTables(newID int, tables []SSTable) SSTable {
 	for len(kfh) > 0 {
 		keyFile := heap.Pop(&kfh).(KeyFile)
 
-		if keyFile.Key != prevKeyFile.Key && keyFile.Key != "" {
+		if keyFile.Key != prevKeyFile.Key && string(keyFile.Value) != "" {
 			if iter%sparseness == 0 {
 				si.Append(recordOffset{
 					Key:    string(prevKeyFile.Key),
