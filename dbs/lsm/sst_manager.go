@@ -221,9 +221,10 @@ func (sm *SSTManager) Compact() {
 			sm.ssTables = append(sm.ssTables, make([]SSTable, 0))
 		}
 		sm.ssTables[newTable.Meta.Level] = append(
-			[]SSTable{newTable},
-			sm.ssTables[newTable.Meta.Level]...,
+			sm.ssTables[newTable.Meta.Level],
+			newTable,
 		)
+
 		// TODO: temporary.
 		sm.ssTables[0] = make([]SSTable, 0)
 		sm.mu.Unlock()
