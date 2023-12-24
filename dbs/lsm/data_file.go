@@ -16,20 +16,20 @@ func flushBytes(file *os.File, b []byte) (int, error) {
 	lb := make([]byte, 8)
 	binary.PutVarint(lb, int64(len(b)))
 
-	total := 0
+	bytesWritten := 0
 	n, err := file.Write(lb)
 	if err != nil {
 		return 0, fmt.Errorf("unable to write length: %w", err)
 	}
-	total += n
+	bytesWritten += n
 
 	n, err = file.Write(b)
 	if err != nil {
 		return 0, fmt.Errorf("unable to write contents: %w", err)
 	}
-	total += n
+	bytesWritten += n
 
-	return total, nil
+	return bytesWritten, nil
 }
 
 func readChunk(file io.ReaderAt, offset, size int) ([]byte, error) {
