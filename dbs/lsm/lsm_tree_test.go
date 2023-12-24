@@ -113,7 +113,7 @@ func TestPutGetWhileCompactingSST(t *testing.T) {
 }
 
 func TestProperlyCompactStale(t *testing.T) {
-	lt, err := NewLSMTree(TEST_DIR, WithMemTableSize(1024*1024))
+	lt, err := NewLSMTree(TEST_DIR, WithMemTableSize(1024*16))
 	assert.Nil(t, err)
 	defer cleanUp()
 

@@ -6,6 +6,8 @@ import (
 	"os"
 )
 
+// TODO: Combine the meta file data into the data file?
+
 type Meta struct {
 	Level int
 	Items int

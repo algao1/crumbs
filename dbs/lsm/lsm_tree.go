@@ -10,10 +10,11 @@ import (
 )
 
 const (
-	DEFAULT_MEM_TABLE_SIZE = 1024 * 1024 * 16 // 16 MB
+	DEFAULT_MEM_TABLE_SIZE = 1024 * 1024 * 64 // 64 MB
 	DEFAULT_MAX_MEM_TABLES = 4
 	DEFAULT_SPARSENESS     = 16
-	DEFAULT_ERROR_PCT      = 0.05
+	DEFAULT_ERROR_PCT      = 0.01
+	DEFAULT_FLUSH_PERIOD   = 5 * time.Second
 )
 
 // TODO:
@@ -22,16 +23,15 @@ const (
 // - update README.md
 
 type LSMTree struct {
-	mu sync.RWMutex
+	mu     sync.RWMutex
+	logger *slog.Logger
 
 	tables []Memtable
 	stm    *SSTManager
 
-	memTableSize int
-	maxMemTables int
-
+	memTableSize  int
+	maxMemTables  int
 	flusherCloser chan struct{}
-	logger        *slog.Logger
 }
 
 type Memtable interface {
@@ -48,7 +48,8 @@ func NewLSMTree(dir string, options ...LSMOption) (*LSMTree, error) {
 	lt := &LSMTree{
 		tables: []Memtable{NewAATree()},
 		stm: NewSSTManager(
-			dir, logger,
+			dir,
+			logger,
 			SSTMOptions{
 				sparseness: DEFAULT_SPARSENESS,
 				errorPct:   DEFAULT_ERROR_PCT,
@@ -66,13 +67,11 @@ func NewLSMTree(dir string, options ...LSMOption) (*LSMTree, error) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("unable to initialize directory: %w", err)
 	}
-
 	if err := lt.stm.Load(); err != nil {
 		return nil, fmt.Errorf("unable to load SSTables from disk: %w", err)
 	}
 
 	go lt.flushPeriodically()
-
 	return lt, nil
 }
 
@@ -126,7 +125,6 @@ func (lt *LSMTree) FlushMemory() error {
 		}
 	}
 	lt.tables = []Memtable{NewAATree()}
-
 	return nil
 }
 
@@ -135,7 +133,7 @@ func (lt *LSMTree) Compact() {
 }
 
 func (lt *LSMTree) flushPeriodically() {
-	t := time.NewTicker(5 * time.Second)
+	t := time.NewTicker(DEFAULT_FLUSH_PERIOD)
 	for {
 		select {
 		case <-lt.flusherCloser:

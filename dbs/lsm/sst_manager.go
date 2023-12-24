@@ -1,9 +1,9 @@
 package lsm
 
 import (
+	"bytes"
 	"container/heap"
 	"fmt"
-	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -20,15 +20,14 @@ const (
 )
 
 type SSTManager struct {
-	mu sync.RWMutex
+	mu     sync.RWMutex
+	logger *slog.Logger
 
 	dir       string
 	ssTables  [][]SSTable
 	ssCounter int
 
-	logger *slog.Logger
-
-	// options.
+	// Options.
 	sparseness int
 	errorPct   float64
 }
@@ -45,7 +44,7 @@ type SSTable struct {
 	Meta        *Meta
 	Index       *SparseIndex
 	BloomFilter *BloomFilter
-	DataFile    io.ReaderAt
+	DataFile    *os.File
 }
 
 func NewSSTManager(dir string, logger *slog.Logger, opts SSTMOptions) *SSTManager {
@@ -60,7 +59,7 @@ func NewSSTManager(dir string, logger *slog.Logger, opts SSTMOptions) *SSTManage
 	return sm
 }
 
-// Add adds and writes a memtable to disk as a SSTable. Requires
+// Add adds and writes a memtable to disk as a SSTable. And requires
 // that the memtable is not the active (most recent) memtable.
 func (sm *SSTManager) Add(mt Memtable) error {
 	sm.mu.Lock()
@@ -257,12 +256,12 @@ func (sm *SSTManager) compactTables(newID int, tables []SSTable) SSTable {
 	totalItems := 0
 
 	for i, t := range tables {
-		kvp, offset, _ := readKeyValue(t.DataFile, 0)
+		kvp, size, _ := readKeyValue(t.DataFile)
 		kfh[i] = KeyFile{
 			Key:     string(kvp.key),
 			Value:   kvp.value,
 			FileIdx: i, // NOTE: this file does not represent the FileID.
-			Offset:  int(offset),
+			Offset:  size,
 		}
 		totalItems += t.Meta.Items
 	}
@@ -315,16 +314,13 @@ func (sm *SSTManager) compactTables(newID int, tables []SSTable) SSTable {
 			continue
 		}
 
-		kvp, newOffset, _ := readKeyValue(
-			tables[keyFile.FileIdx].DataFile,
-			int64(keyFile.Offset),
-		)
+		kvp, size, _ := readKeyValue(tables[keyFile.FileIdx].DataFile)
 
 		heap.Push(&kfh, KeyFile{
 			Key:     string(kvp.key),
 			Value:   kvp.value,
 			FileIdx: keyFile.FileIdx,
-			Offset:  int(newOffset),
+			Offset:  keyFile.Offset + size,
 		})
 	}
 
@@ -367,13 +363,17 @@ func findInSSTable(ss SSTable, key string) ([]byte, bool, error) {
 		maxOffset = ss.FileSize
 	}
 
-	for offset < maxOffset {
-		kvp, newOffset, err := readKeyValue(ss.DataFile, int64(offset))
+	chunk, err := readChunk(ss.DataFile, offset, maxOffset-offset)
+	if err != nil {
+		return nil, false, fmt.Errorf("unable to read chunk: %w", err)
+	}
+	buf := bytes.NewBuffer(chunk)
+
+	for buf.Len() > 0 {
+		kvp, _, err := readKeyValue(buf)
 		if err != nil {
 			return nil, false, fmt.Errorf("unable to find in SSTable: %w", err)
 		}
-		offset = int(newOffset)
-
 		if key == string(kvp.key) {
 			return kvp.value, true, nil
 		}

@@ -42,7 +42,7 @@ func main() {
 		},
 	}
 
-	numOps := 1000000 / 2
+	numOps := 1000000
 
 	for _, db := range dbs {
 		fmt.Printf("Benchmarks for %s\n", db.name)
@@ -86,7 +86,7 @@ func benchSeqGetKeyVals(store KVStore, numOps, strSize int) {
 			panic(err)
 		}
 		if string(v) != fmt.Sprintf("val_%d", i) {
-			panic("incorrect value found")
+			panic(fmt.Sprintf("incorrect value found, expected: val_%d, got: %s", i, v))
 		}
 	}
 	fmt.Println("\tbenchSeqGetKeyVals:")
