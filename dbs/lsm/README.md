@@ -1,11 +1,13 @@
 # lsm
 
-A basic LSM-tree key-value store written almost completely from scratch (aside from the hash function). It supports concurrent reads and writes (with non-blocking compaction!), but it is *not exactly* performant, which means I probably messed up somewhere.
+A basic LSM-tree key-value store written almost completely from scratch (aside from the hash function). It supports concurrent reads and writes (with non-blocking compaction!), but it is only somewhat performant, which means I probably messed up somewhere.
 
-Currently it
+## Details
+
+Currently it:
 
 - Uses an [AA-tree](https://user.it.uu.se/~arnea/ps/simp.pdf) as the underlying balanced tree
-- Uses a sparse index (per file) to speed up searches
+- Uses a sparse index to speed up searches
 - Uses a bloom filter to speed up searches
 - Periodically flushes memtables to disk as SSTables
 - Requires a manual trigger to compact **the entire first level** into the next level.
@@ -25,20 +27,20 @@ This is done on my machine with 1M key-value pairs.
 
 ```
 benchPutKeyVals: 
-260.093896ms
-1922340 ops/s
+534.135643ms
+1872163 ops/s
 
 benchSeqGetKeyVals: 
-6.213537798s
-80469 ops/s
+2.521419828s
+396601 ops/s
 
 benchRandGetKeyVals: 
-6.622176223s
-75504 ops/s
+3.527472544s
+283489 ops/s
 
 benchConcRandGetKeyVals:
-3.595554249s
-139060 ops/s
+2.421205544s
+413016 ops/s
 ```
 
 ## Design
