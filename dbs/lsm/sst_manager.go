@@ -258,12 +258,17 @@ func (sm *SSTManager) compactTables(newID int, tables []SSTable) SSTable {
 	totalItems := 0
 
 	for i, t := range tables {
-		kvp, size, _ := readKeyValue(t.DataFile)
+		// TODO: For better memory performance, don't load the whole chunk,
+		// load smaller ones (maybe like every X intervals?).
+		chunk, _ := readChunk(t.DataFile, 0, t.FileSize)
+		buf := bytes.NewBuffer(chunk)
+
+		kvp, _, _ := readKeyValue(buf)
 		kfh[i] = KeyFile{
 			Key:     string(kvp.key),
 			Value:   kvp.value,
 			FileIdx: i, // NOTE: this file does not represent the FileID.
-			Offset:  size,
+			Reader:  buf,
 		}
 		totalItems += t.Meta.Items
 	}
@@ -311,18 +316,16 @@ func (sm *SSTManager) compactTables(newID int, tables []SSTable) SSTable {
 		}
 
 		prevKeyFile = keyFile
-
-		if keyFile.Offset >= tables[keyFile.FileIdx].FileSize {
+		if keyFile.Reader.Len() == 0 {
 			continue
 		}
-
-		kvp, size, _ := readKeyValue(tables[keyFile.FileIdx].DataFile)
+		kvp, _, _ := readKeyValue(keyFile.Reader)
 
 		heap.Push(&kfh, KeyFile{
 			Key:     string(kvp.key),
 			Value:   kvp.value,
 			FileIdx: keyFile.FileIdx,
-			Offset:  keyFile.Offset + size,
+			Reader:  keyFile.Reader,
 		})
 	}
 

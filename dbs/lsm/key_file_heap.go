@@ -1,10 +1,17 @@
 package lsm
 
+import "io"
+
+type ReaderLengther interface {
+	io.Reader
+	Len() int
+}
+
 type KeyFile struct {
 	Key     string
 	Value   []byte
 	FileIdx int
-	Offset  int
+	Reader  ReaderLengther
 }
 
 type KeyFileHeap []KeyFile

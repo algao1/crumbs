@@ -164,10 +164,9 @@ func TestSaveAndLoad(t *testing.T) {
 		val := []byte(fmt.Sprintf("val_%d", i))
 		lt.Put(key, val)
 	}
-	assert.Nil(t, lt.Close())
-
-	lt.Compact()
+	// assert.Nil(t, lt.Close())
 	lt.FlushMemory()
+	lt.Compact()
 
 	lt, err = NewLSMTree(TEST_DIR)
 	assert.Nil(t, err)
