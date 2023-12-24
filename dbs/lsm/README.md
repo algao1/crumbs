@@ -25,20 +25,20 @@ This is done on my machine with 1M key-value pairs.
 
 ```
 benchPutKeyVals: 
-260.093896ms
-1922340 ops/s
+534.135643ms
+1872163 ops/s
 
 benchSeqGetKeyVals: 
-6.213537798s
-80469 ops/s
+2.521419828s
+396601 ops/s
 
 benchRandGetKeyVals: 
-6.622176223s
-75504 ops/s
+3.527472544s
+283489 ops/s
 
 benchConcRandGetKeyVals:
-3.595554249s
-139060 ops/s
+2.421205544s
+413016 ops/s
 ```
 
 ## Design
