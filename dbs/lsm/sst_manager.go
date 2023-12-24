@@ -206,13 +206,15 @@ func (sm *SSTManager) Compact() {
 		sm.ssCounter++
 		sm.mu.Unlock()
 
-		sm.logger.Info("compaction in progress")
+		sm.logger.Info("compaction: in progress")
 
 		sm.mu.RLock()
 		// TODO: temporary.
 		toCompact := sm.ssTables[0]
 		newTable := sm.compactTables(newID, toCompact)
 		sm.mu.RUnlock()
+
+		sm.logger.Info("compaction: finished creating new table")
 
 		// Lock and make updates to table.
 		sm.mu.Lock()
@@ -241,7 +243,7 @@ func (sm *SSTManager) Compact() {
 		}
 
 		sm.logger.Info(
-			"compaction finished",
+			"compaction: finished",
 			"tablesCompacted", len(toCompact),
 			"newTableLevel", newTable.Meta.Level,
 		)

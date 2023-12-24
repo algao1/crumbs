@@ -10,11 +10,12 @@ import (
 )
 
 const (
-	DEFAULT_MEM_TABLE_SIZE = 1024 * 1024 * 64 // 64 MB
-	DEFAULT_MAX_MEM_TABLES = 4
-	DEFAULT_SPARSENESS     = 16
-	DEFAULT_ERROR_PCT      = 0.01
-	DEFAULT_FLUSH_PERIOD   = 5 * time.Second
+	DEFAULT_MEM_TABLE_SIZE     = 1024 * 1024 * 64 // 64 MB
+	DEFAULT_MAX_MEM_TABLES     = 4
+	DEFAULT_MAX_FLUSHED_TABLES = 4
+	DEFAULT_SPARSENESS         = 16
+	DEFAULT_ERROR_PCT          = 0.01
+	DEFAULT_FLUSH_PERIOD       = 15 * time.Second
 )
 
 // TODO:
@@ -129,6 +130,14 @@ func (lt *LSMTree) FlushMemory() error {
 }
 
 func (lt *LSMTree) Compact() {
+	lt.flusherCloser <- struct{}{}
+	defer func() {
+		// We do this because Go prevents recursive read locking.
+		// So it blocks all subsequent reads that occurs after we try to
+		// add/flush the new memtable.
+		// See https://pkg.go.dev/sync#RWMutex.
+		go lt.flushPeriodically()
+	}()
 	lt.stm.Compact()
 }
 
@@ -140,11 +149,18 @@ func (lt *LSMTree) flushPeriodically() {
 			return
 		case <-t.C:
 			lt.mu.Lock()
-			n := len(lt.tables)
+
 			var mts []Memtable
-			if n > lt.maxMemTables {
-				mts = lt.tables[:n-lt.maxMemTables]
+			numToFlush := min(
+				max(len(lt.tables)-lt.maxMemTables, 0),
+				DEFAULT_MAX_FLUSHED_TABLES,
+			)
+			numInMemory := len(lt.tables) - numToFlush
+
+			if numToFlush > 0 {
+				mts = lt.tables[:numToFlush]
 			} else {
+				lt.logger.Info("nothing to flush, skipping")
 				lt.mu.Unlock()
 				continue
 			}
@@ -157,9 +173,13 @@ func (lt *LSMTree) flushPeriodically() {
 					break
 				}
 			}
+			lt.logger.Info("finished flushing memtables",
+				slog.Int("tables flushed", numToFlush),
+				slog.Int("tables in memory", numInMemory),
+			)
 
 			lt.mu.Lock()
-			lt.tables = lt.tables[n-lt.maxMemTables:]
+			lt.tables = lt.tables[numToFlush:]
 			lt.mu.Unlock()
 		}
 	}
