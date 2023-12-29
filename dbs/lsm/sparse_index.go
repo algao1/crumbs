@@ -40,6 +40,7 @@ func (si *SparseIndex) findBounds(key string) (int, int) {
 	left, right := 0, n-1
 	for left < right {
 		mid := left + (right-left)/2
+
 		if si.Index[mid].Key < key {
 			left = mid + 1
 		} else {
@@ -52,17 +53,10 @@ func (si *SparseIndex) findBounds(key string) (int, int) {
 	}
 
 	// Find the lowest greater bound.
-	left++
-	right = n
-	for left < right {
-		mid := left + (right-left)/2
-		if si.Index[mid].Key < key {
-			left = mid + 1
-		} else {
-			right = mid
-		}
+	upperBound := left + 1
+	for upperBound < n && si.Index[upperBound].Key <= key {
+		upperBound++
 	}
-	upperBound := left
 
 	return lowerBound, upperBound
 }
