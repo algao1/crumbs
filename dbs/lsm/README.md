@@ -94,3 +94,7 @@ One of my goals for this implementation, was to support non-blocking compaction,
 > It does this by minimizing the amount of time the caller holds the mutex.
 
 <!-- TODO: Insert diagram here. -->
+
+## Additional Resources
+- https://itnext.io/storing-time-series-in-rocksdb-a-cookbook-e873fcb117e4
+- https://www.timescale.com/blog/time-series-compression-algorithms-explained/
