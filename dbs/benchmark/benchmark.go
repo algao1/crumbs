@@ -1,26 +1,39 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"math/rand"
 	"os"
+	"runtime/pprof"
 	"sync"
 	"time"
 )
 
-func main() {
-	// f, err := os.Create("cpu_profile.pprof")
-	// if err != nil {
-	// 	fmt.Println("unable to create CPU profile: ", err)
-	// 	return
-	// }
-	// defer f.Close()
+var (
+	profile bool
+)
 
-	// if err := pprof.StartCPUProfile(f); err != nil {
-	// 	fmt.Println("unable to start CPU profile: ", err)
-	// 	return
-	// }
-	// defer pprof.StopCPUProfile()
+func init() {
+	flag.BoolVar(&profile, "profile", false, "profile cpu")
+	flag.Parse()
+}
+
+func main() {
+	if profile {
+		f, err := os.Create("cpu_profile.pprof")
+		if err != nil {
+			fmt.Println("unable to create CPU profile: ", err)
+			return
+		}
+		defer f.Close()
+
+		if err := pprof.StartCPUProfile(f); err != nil {
+			fmt.Println("unable to start CPU profile: ", err)
+			return
+		}
+		defer pprof.StopCPUProfile()
+	}
 
 	defer cleanUp()
 	cleanUp()
@@ -28,13 +41,13 @@ func main() {
 	dbs := []struct {
 		name  string
 		dir   string
-		store KVStore
+		store kvStore
 	}{
-		{
-			name:  "Keg",
-			dir:   "data/keg",
-			store: NewKegWrapper("data/keg"),
-		},
+		// {
+		// 	name:  "Keg",
+		// 	dir:   "data/keg",
+		// 	store: NewKegWrapper("data/keg"),
+		// },
 		{
 			name:  "LSM",
 			dir:   "data/lsm",
@@ -56,7 +69,7 @@ func main() {
 	}
 }
 
-type KVStore interface {
+type kvStore interface {
 	Put(key string, val []byte) error
 	Get(key string) ([]byte, error)
 	Delete(key string) error
@@ -64,7 +77,11 @@ type KVStore interface {
 	Reset()
 }
 
-func benchPutKeyVals(store KVStore, numOps, strSize int) {
+func printBenchmarkResults(name string, elapsed time.Duration, numOps int) {
+	fmt.Printf("%-20s%14s%12d ops%12.0f ops/s\n", name, elapsed, numOps, float64(numOps)/elapsed.Seconds())
+}
+
+func benchPutKeyVals(store kvStore, numOps, strSize int) {
 	t := time.Now()
 	for i := 0; i < numOps; i++ {
 		val := []byte(fmt.Sprintf("val_%d", i))
@@ -73,12 +90,10 @@ func benchPutKeyVals(store KVStore, numOps, strSize int) {
 			panic(err)
 		}
 	}
-	fmt.Println("\tbenchPutKeyVals:")
-	fmt.Printf("\t\t%s\n", time.Since(t))
-	fmt.Printf("\t\t%.0f ops/s\n", float64(numOps)/time.Since(t).Seconds())
+	printBenchmarkResults("PutKeyVals", time.Since(t), numOps)
 }
 
-func benchSeqGetKeyVals(store KVStore, numOps, strSize int) {
+func benchSeqGetKeyVals(store kvStore, numOps, strSize int) {
 	t := time.Now()
 	for i := 0; i < numOps; i++ {
 		v, err := store.Get(fmt.Sprintf("key_%d", i))
@@ -89,12 +104,10 @@ func benchSeqGetKeyVals(store KVStore, numOps, strSize int) {
 			panic(fmt.Sprintf("incorrect value found, expected: val_%d, got: %s", i, v))
 		}
 	}
-	fmt.Println("\tbenchSeqGetKeyVals:")
-	fmt.Printf("\t\t%s\n", time.Since(t))
-	fmt.Printf("\t\t%.0f ops/s\n", float64(numOps)/time.Since(t).Seconds())
+	printBenchmarkResults("SeqGetKeyVals", time.Since(t), numOps)
 }
 
-func benchRandGetKeyVals(store KVStore, numOps int) {
+func benchRandGetKeyVals(store kvStore, numOps int) {
 	t := time.Now()
 	for i := 0; i < numOps; i++ {
 		idx := rand.Intn(numOps)
@@ -103,12 +116,10 @@ func benchRandGetKeyVals(store KVStore, numOps int) {
 			panic(err)
 		}
 	}
-	fmt.Println("\tbenchRandGetKeyVals:")
-	fmt.Printf("\t\t%s\n", time.Since(t))
-	fmt.Printf("\t\t%.0f ops/s\n", float64(numOps)/time.Since(t).Seconds())
+	printBenchmarkResults("RandGetKeyVals", time.Since(t), numOps)
 }
 
-func benchConcRandGetKeyVals(store KVStore, numOps int) {
+func benchConcRandGetKeyVals(store kvStore, numOps int) {
 	t := time.Now()
 	var wg sync.WaitGroup
 	for i := 0; i < numOps; i++ {
@@ -120,9 +131,7 @@ func benchConcRandGetKeyVals(store KVStore, numOps int) {
 		}()
 	}
 	wg.Wait()
-	fmt.Println("\tbenchConcRandGetKeyVals:")
-	fmt.Printf("\t\t%s\n", time.Since(t))
-	fmt.Printf("\t\t%.0f ops/s\n", float64(numOps)/time.Since(t).Seconds())
+	printBenchmarkResults("ConcRandGetKeyVals", time.Since(t), numOps)
 }
 
 func cleanUp() {
