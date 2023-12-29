@@ -116,11 +116,10 @@ func NewTimeSeriesStore(dir string) (*TimeSeriesStore, error) {
 	return s, nil
 }
 
-func (s *TimeSeriesStore) Put(p Point) error {
-	mKey := metricKey(p.Metric, p.Tags)
+func (s *TimeSeriesStore) setOrGetMetricId(mKey string) (int, error) {
 	v, err := s.metaStore.Get(mKey)
 	if err != nil {
-		return err
+		return -1, err
 	}
 
 	var metricId int
@@ -133,6 +132,15 @@ func (s *TimeSeriesStore) Put(p Point) error {
 		s.curMetricId++
 	} else {
 		metricId = int(binary.BigEndian.Uint64(v))
+	}
+
+	return metricId, nil
+}
+
+func (s *TimeSeriesStore) Put(p Point) error {
+	metricId, err := s.setOrGetMetricId(metricKey(p.Metric, p.Tags))
+	if err != nil {
+		return fmt.Errorf("unable to get metric id: %w", err)
 	}
 	tKey := timeKey(p.Time, metricId)
 
