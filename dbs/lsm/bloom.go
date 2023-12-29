@@ -3,11 +3,9 @@ package lsm
 import (
 	"encoding/gob"
 	"fmt"
+	"hash/fnv"
 	"math"
 	"os"
-	"strings"
-
-	"github.com/cespare/xxhash/v2"
 )
 
 type hashFunc func([]byte) int
@@ -31,15 +29,7 @@ func NewBloomFilter(n int, dfp float64) (*BloomFilter, error) {
 	}
 
 	for i := 0; i < k; i++ {
-		pad := []byte(strings.Repeat(".", i))
-		bf.hashFuncs[i] = func(b []byte) int {
-			b = append(b, pad...)
-			ret := int(xxhash.Sum64(b))
-			if ret < 0 {
-				ret *= -1
-			}
-			return ret
-		}
+		bf.hashFuncs[i] = hashFnv1a(uint64(k))
 	}
 
 	return &bf, nil
@@ -96,19 +86,24 @@ func (bf *BloomFilter) Decode(filename string) error {
 	nbf.hashFuncs = make([]hashFunc, nbf.K)
 
 	for i := 0; i < nbf.K; i++ {
-		pad := []byte(strings.Repeat(".", i))
-		nbf.hashFuncs[i] = func(b []byte) int {
-			b = append(b, pad...)
-			ret := int(xxhash.Sum64(b))
-			if ret < 0 {
-				ret *= -1
-			}
-			return ret
-		}
+		bf.hashFuncs[i] = hashFnv1a(uint64(i))
 	}
 
 	*bf = nbf
 	return nil
+}
+
+func hashFnv1a(seed uint64) hashFunc {
+	return func(data []byte) int {
+		hash := fnv.New64a()
+		hash.Write(data)
+		hash.Write([]byte{byte(seed)})
+		val := int(hash.Sum64())
+		if val < 0 {
+			val *= -1
+		}
+		return val
+	}
 }
 
 func optimalKM(n, dfp float64) (int, int) {
