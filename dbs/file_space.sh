@@ -33,6 +33,6 @@ find "$directory" -type f | \
     percentage=$(awk "BEGIN {printf \"%.2f\", ($total_size / $(du -sb "$directory" | cut -f1)) * 100}")
 
     # Print the results with tabs as delimiters
-    printf "%-30s\t%-8s\t%-15s\t%-8s\n" "Files with extension .$extension:" "$count files," "Total size: $total_size bytes," "Percentage: $percentage%"
+    printf "%-30s\t%-10s\t%-30s\t%-10s\n" "Files with extension .$extension:" "$count files," "Total size: $total_size bytes," "Percentage: $percentage%"
   done
 
