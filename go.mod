@@ -4,6 +4,9 @@ go 1.21
 
 require (
 	github.com/hashicorp/consul/api v1.20.0
+	github.com/jamiealquiza/tachymeter v2.0.0+incompatible
+	github.com/pingcap/go-ycsb v1.0.1
+	github.com/rodaine/table v1.1.0
 	github.com/stretchr/testify v1.8.4
 	google.golang.org/grpc v1.54.0
 	google.golang.org/protobuf v1.30.0
@@ -11,13 +14,18 @@ require (
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/magiconair/properties v1.8.0 // indirect
+	github.com/mattn/go-runewidth v0.0.9 // indirect
+	github.com/olekukonko/tablewriter v0.0.5 // indirect
+	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
+	go.uber.org/atomic v1.9.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
 require (
 	github.com/armon/go-metrics v0.0.0-20180917152333-f0300d1749da // indirect
-	github.com/fatih/color v1.9.0 // indirect
+	github.com/fatih/color v1.9.0
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.1 // indirect
 	github.com/hashicorp/go-hclog v0.12.0 // indirect
