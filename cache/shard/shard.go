@@ -15,7 +15,7 @@ type ShardedCache struct {
 func NewShardedCache(shards, entriesPerShard int, ttl time.Duration) *ShardedCache {
 	caches := make([]*lru.Cache, shards)
 	for i := 0; i < shards; i++ {
-		caches[i] = lru.NewCache(entriesPerShard, ttl)
+		caches[i] = lru.NewCache(entriesPerShard, ttl, nil)
 	}
 
 	return &ShardedCache{

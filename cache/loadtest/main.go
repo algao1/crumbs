@@ -23,7 +23,7 @@ func main() {
 	ttl := 1 * time.Minute
 	concurrency := 16
 
-	c := lru.NewCache(cacheSize, ttl)
+	c := lru.NewCache(cacheSize, ttl, nil)
 	// c := shard.NewShardedCache(4, 100, ttl)
 
 	wt := tachymeter.New(&tachymeter.Config{Size: cacheSize * 5})

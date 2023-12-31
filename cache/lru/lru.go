@@ -7,10 +7,13 @@ import (
 	"time"
 )
 
+type EvictFunc func(key, value any)
+
 type Cache struct {
 	mu sync.RWMutex
 
 	maxEntries int
+	onEvict    EvictFunc
 	ttl        time.Duration
 
 	ll    *list.List
@@ -30,9 +33,10 @@ type entry struct {
 	lastAccessed time.Time
 }
 
-func NewCache(maxEntries int, ttl time.Duration) *Cache {
+func NewCache(maxEntries int, ttl time.Duration, onEvict EvictFunc) *Cache {
 	c := &Cache{
 		maxEntries: maxEntries,
+		onEvict:    onEvict,
 		ttl:        ttl,
 		ll:         list.New(),
 		cache:      make(map[any]*list.Element),
@@ -122,6 +126,10 @@ func (c *Cache) removeElement(e *list.Element) {
 	c.ll.Remove(e)
 	delete(c.cache, e.Value.(entry).key)
 	atomic.AddUint64(&c.stats.Evicted, 1)
+
+	if c.onEvict != nil {
+		c.onEvict(e.Value.(entry).key, e.Value.(entry).value)
+	}
 }
 
 func (c *Cache) cacheSizeExceeded() bool {
