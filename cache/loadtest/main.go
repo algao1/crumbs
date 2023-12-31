@@ -14,7 +14,6 @@ import (
 type cache interface {
 	Add(key, value any)
 	Get(key any) (any, bool)
-	Remove(key any)
 }
 
 func main() {
@@ -25,6 +24,7 @@ func main() {
 	concurrency := 16
 
 	c := lru.NewCache(cacheSize, ttl)
+	// c := shard.NewShardedCache(4, 100, ttl)
 
 	wt := tachymeter.New(&tachymeter.Config{Size: cacheSize * 5})
 	rt := tachymeter.New(&tachymeter.Config{Size: cacheSize * 5})

@@ -3,7 +3,8 @@
 **Breadcrumbs of knowledge**. A collection of smallish, playground projects; mostly for learning purposes and for fun. Probably will make a blog out of these when I get the time.
 
 ### Cache
-- **LRU** - A LRU cache
+- **LRU** - A simple, concurrent LRU cache
+- **Sharded LRU** - A sharded LRU cache
 
 ### Database
 - **Keg** - A simple no-dependency disk-based key-value store, based on [Bitcask](https://github.com/basho/bitcask).
