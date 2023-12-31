@@ -33,6 +33,11 @@ func (sc *ShardedCache) Get(key any) (any, bool) {
 	return sc.shards[shard].Get(key)
 }
 
+func (sc *ShardedCache) Remove(key any) {
+	shard := hash(key) % uint64(len(sc.shards))
+	sc.shards[shard].Remove(key)
+}
+
 func (sc *ShardedCache) Stats() lru.Stats {
 	stats := lru.Stats{}
 	for _, shard := range sc.shards {
