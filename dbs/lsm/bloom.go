@@ -29,7 +29,7 @@ func NewBloomFilter(n int, dfp float64) (*BloomFilter, error) {
 	}
 
 	for i := 0; i < k; i++ {
-		bf.hashFuncs[i] = hashFnv1a(uint64(k))
+		bf.hashFuncs[i] = hashFnv1a(uint64(i))
 	}
 
 	return &bf, nil
@@ -86,7 +86,7 @@ func (bf *BloomFilter) Decode(filename string) error {
 	nbf.hashFuncs = make([]hashFunc, nbf.K)
 
 	for i := 0; i < nbf.K; i++ {
-		bf.hashFuncs[i] = hashFnv1a(uint64(i))
+		nbf.hashFuncs[i] = hashFnv1a(uint64(i))
 	}
 
 	*bf = nbf

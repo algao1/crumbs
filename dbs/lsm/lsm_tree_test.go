@@ -10,6 +10,10 @@ import (
 
 const TEST_DIR = ".testdata"
 
+func init() {
+	cleanUp()
+}
+
 func cleanUp() {
 	os.RemoveAll(TEST_DIR)
 }
