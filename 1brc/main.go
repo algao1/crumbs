@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"log"
@@ -16,6 +17,40 @@ type stat struct {
 	minT  float64
 	maxT  float64
 	count int
+}
+
+type intStat struct {
+	sumT  int32
+	minT  int32
+	maxT  int32
+	count int
+}
+
+// Inspired by https://benhoyt.com/writings/go-1brc/
+func parseTempInt(b []byte) (string, int32) {
+	cityBytes, tempBytes, _ := bytes.Cut(b, []byte{';'})
+
+	var i int
+	var temp int32
+	var negative bool
+
+	if tempBytes[i] == '-' {
+		negative = true
+		i++
+	}
+
+	for i < len(tempBytes) {
+		if tempBytes[i] != '.' {
+			temp = temp*10 + int32(tempBytes[i]-'0')
+		}
+		i++
+	}
+
+	if negative {
+		temp *= -1
+	}
+
+	return string(cityBytes), temp
 }
 
 func parseTempFloat(line string) (string, float64) {
@@ -63,5 +98,7 @@ func main() {
 		sol1(filePath)
 	case 2:
 		sol2(filePath, numWorkers)
+	case 3:
+		sol3(filePath, numWorkers)
 	}
 }
