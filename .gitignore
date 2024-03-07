@@ -3,3 +3,5 @@ exp_*
 
 **/data
 cpu_profile.*
+
+measurements.txt
