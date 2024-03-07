@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"log"
@@ -10,6 +11,40 @@ import (
 
 	"golang.org/x/exp/maps"
 )
+
+type intStat struct {
+	sumT  int32
+	minT  int32
+	maxT  int32
+	count int
+}
+
+// Inspired by https://benhoyt.com/writings/go-1brc/
+func parseTempInt(b []byte) (string, int32) {
+	cityBytes, tempBytes, _ := bytes.Cut(b, []byte{';'})
+
+	var i int
+	var negative bool
+
+	if tempBytes[i] == '-' {
+		negative = true
+		i++
+	}
+
+	var temp int32
+	for i < len(tempBytes) {
+		if tempBytes[i] != '.' {
+			temp = temp*10 + int32(tempBytes[i]-'0')
+		}
+		i++
+	}
+
+	if negative {
+		temp *= -1
+	}
+
+	return string(cityBytes), temp
+}
 
 func process3(r io.Reader, ch chan map[string]*intStat) {
 	scanner := bufio.NewScanner(r)

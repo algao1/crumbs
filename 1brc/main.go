@@ -1,66 +1,12 @@
 package main
 
 import (
-	"bytes"
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"runtime"
 	"runtime/pprof"
-	"strconv"
-	"strings"
 )
-
-type stat struct {
-	sumT  float64
-	minT  float64
-	maxT  float64
-	count int
-}
-
-type intStat struct {
-	sumT  int32
-	minT  int32
-	maxT  int32
-	count int
-}
-
-// Inspired by https://benhoyt.com/writings/go-1brc/
-func parseTempInt(b []byte) (string, int32) {
-	cityBytes, tempBytes, _ := bytes.Cut(b, []byte{';'})
-
-	var i int
-	var negative bool
-
-	if tempBytes[i] == '-' {
-		negative = true
-		i++
-	}
-
-	var temp int32
-	for i < len(tempBytes) {
-		if tempBytes[i] != '.' {
-			temp = temp*10 + int32(tempBytes[i]-'0')
-		}
-		i++
-	}
-
-	if negative {
-		temp *= -1
-	}
-
-	return string(cityBytes), temp
-}
-
-func parseTempFloat(line string) (string, float64) {
-	split := strings.Split(line, ";")
-	temp, err := strconv.ParseFloat(split[1], 64)
-	if err != nil {
-		log.Fatalf("unable to parse float: %v", err)
-	}
-	return split[0], temp
-}
 
 var (
 	sol        int

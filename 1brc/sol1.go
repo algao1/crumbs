@@ -6,9 +6,27 @@ import (
 	"log"
 	"os"
 	"sort"
+	"strconv"
+	"strings"
 
 	"golang.org/x/exp/maps"
 )
+
+type stat struct {
+	sumT  float64
+	minT  float64
+	maxT  float64
+	count int
+}
+
+func parseTempFloat(line string) (string, float64) {
+	split := strings.Split(line, ";")
+	temp, err := strconv.ParseFloat(split[1], 64)
+	if err != nil {
+		log.Fatalf("unable to parse float: %v", err)
+	}
+	return split[0], temp
+}
 
 func sol1(filePath string) {
 	file, err := os.Open(filePath)
