@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"log"
@@ -12,53 +12,62 @@ import (
 )
 
 // Inspired by https://benhoyt.com/writings/go-1brc/
-func parseTempIntOptimized(b []byte) (string, int32) {
-	bLen := len(b)
-	temp := int32(b[bLen-3]-'0')*10 + int32(b[bLen-1]-'0')
-
-	cutIdx := bLen - 4
-
-	for b[cutIdx] != ';' {
-		if b[cutIdx] == '-' {
-			temp *= -1
-		} else {
-			temp += int32(b[cutIdx]-'0') * 100
-		}
-		cutIdx--
-	}
-
-	return string(b[:cutIdx]), temp
-}
-
-func process4(r io.Reader, ch chan map[string]*intStat) {
-	scanner := bufio.NewScanner(r)
+func process5(r *io.SectionReader, ch chan map[string]*intStat) {
 	records := make(map[string]*intStat)
 
-	for scanner.Scan() {
-		city, temp := parseTempIntOptimized(scanner.Bytes())
+	start := 0
+	buf := make([]byte, 1024*1024)
 
-		r, ok := records[city]
-		if !ok {
-			records[city] = &intStat{
-				count: 1,
-				sumT:  temp,
-				minT:  temp,
-				maxT:  temp,
-			}
-			continue
+	for {
+		n, err := r.Read(buf[start:])
+		if err != nil && err != io.EOF {
+			panic("something weird happened")
+		}
+		if start+n == 0 {
+			break
 		}
 
-		r.count++
-		r.sumT += temp
-		r.minT = min(r.minT, temp)
-		r.maxT = max(r.maxT, temp)
-		records[city] = r
+		chunk := buf[:start+n]
+		newline := bytes.LastIndexByte(chunk, '\n')
+		if newline < 0 {
+			break
+		}
+		remaining := chunk[newline+1:]
+		chunk = chunk[:newline+1]
+
+		for {
+			line, after, _ := bytes.Cut(chunk, []byte("\n"))
+			if len(line) == 0 {
+				break
+			}
+			chunk = after
+
+			city, temp := parseTempIntOptimized(line)
+			r, ok := records[city]
+			if !ok {
+				records[city] = &intStat{
+					count: 1,
+					sumT:  temp,
+					minT:  temp,
+					maxT:  temp,
+				}
+				continue
+			}
+
+			r.count++
+			r.sumT += temp
+			r.minT = min(r.minT, temp)
+			r.maxT = max(r.maxT, temp)
+			records[city] = r
+		}
+
+		start = copy(buf, remaining)
 	}
 
 	ch <- records
 }
 
-func sol4(filePath string, numWorkers int) {
+func sol5(filePath string, numWorkers int) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		log.Fatal(err)
@@ -97,7 +106,7 @@ func sol4(filePath string, numWorkers int) {
 			defer r.Close()
 
 			sr := io.NewSectionReader(r, start, end-start)
-			process4(sr, rx)
+			process5(sr, rx)
 		}(start, end)
 	}
 

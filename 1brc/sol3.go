@@ -147,9 +147,9 @@ func sol3(filePath string, numWorkers int) {
 		fmt.Printf(
 			"%s=%.1f/%.1f/%.1f",
 			city,
-			float64(stat.minT),
+			float64(stat.minT)/10,
 			float64(stat.sumT)/float64(stat.count)/10,
-			float64(stat.maxT),
+			float64(stat.maxT)/10,
 		)
 	}
 	fmt.Print("}\n")

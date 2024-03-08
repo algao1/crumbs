@@ -48,5 +48,7 @@ func main() {
 		sol3(filePath, numWorkers)
 	case 4:
 		sol4(filePath, numWorkers)
+	case 5:
+		sol5(filePath, numWorkers)
 	}
 }
