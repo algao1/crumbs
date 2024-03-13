@@ -79,17 +79,19 @@ func sol5(filePath string, numWorkers int) {
 		log.Fatalf("unable to stat file: %v", err)
 	}
 
+	step := fStat.Size() / int64(numWorkers)
 	offsets := make([]int64, numWorkers)
-	for i := 1; i < numWorkers; i++ {
-		var incr int64
-		b := make([]byte, 1)
 
-		file.Seek(fStat.Size()/int64(numWorkers), 0)
+	for i := 1; i < numWorkers; i++ {
+		pos := int64(i) * step
+		file.Seek(pos, 0)
+
+		b := make([]byte, 1)
 		for b[0] != '\n' {
 			file.Read(b)
-			incr += 1
+			pos += 1
 		}
-		offsets[i] = fStat.Size()/int64(numWorkers) + incr
+		offsets[i] = pos
 	}
 
 	rx := make(chan map[string]*intStat)
