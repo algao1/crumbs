@@ -1,15 +1,25 @@
 package coro
 
+import (
+	"errors"
+	"fmt"
+)
+
+// Code directly from: https://research.swtch.com/coro
+
+var ErrCanceled = errors.New("coroutine canceled")
+
 type msg[T any] struct {
 	panic any
 	val   T
 }
 
 // This is a push iterator?
-func New[In, Out any](f func(in In, yield func(Out) In) Out) (resume func(In) (Out, bool)) {
-	cin := make(chan In)
+func New[In, Out any](f func(in In, yield func(Out) In) Out) (
+	resume func(In) (Out, bool), cancel func(),
+) {
+	cin := make(chan msg[In])
 	cout := make(chan msg[Out])
-
 	running := true
 
 	// resume and yield functions forms a pair
@@ -20,16 +30,28 @@ func New[In, Out any](f func(in In, yield func(Out) In) Out) (resume func(In) (O
 		if !running {
 			return
 		}
-		cin <- in
+		cin <- msg[In]{val: in}
 		m := <-cout
 		if m.panic != nil {
 			panic(m.panic)
 		}
 		return m.val, running
 	}
+	cancel = func() {
+		e := fmt.Errorf("%w", ErrCanceled)
+		cin <- msg[In]{panic: e}
+		m := <-cout
+		if m.panic != nil && m.panic != e {
+			panic(m.panic)
+		}
+	}
 	yield := func(out Out) In {
 		cout <- msg[Out]{val: out}
-		return <-cin
+		m := <-cin
+		if m.panic != nil {
+			panic(m.panic)
+		}
+		return m.val
 	}
 
 	// blocks on <-cin, so no opportunity for parallelism
@@ -40,12 +62,16 @@ func New[In, Out any](f func(in In, yield func(Out) In) Out) (resume func(In) (O
 				cout <- msg[Out]{panic: recover()}
 			}
 		}()
-		out := f(<-cin, yield)
+		var out Out
+		m := <-cin
+		if m.panic == nil {
+			out = f(m.val, yield)
+		}
 		running = false
 		cout <- msg[Out]{val: out}
 	}()
 
-	return resume
+	return resume, cancel
 }
 
 func Pull[V any](push func(yield func(V) bool)) (pull func() (V, bool), stop func()) {
@@ -58,7 +84,7 @@ func Pull[V any](push func(yield func(V) bool)) (pull func() (V, bool), stop fun
 		var zero V
 		return zero
 	}
-	resume := New(copush)
+	resume, _ := New(copush)
 	pull = func() (V, bool) {
 		return resume(true)
 	}

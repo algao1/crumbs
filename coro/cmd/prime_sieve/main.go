@@ -3,6 +3,8 @@ package main
 import (
 	"crumbs/coro"
 	"fmt"
+	"runtime"
+	"runtime/debug"
 )
 
 func main() {
@@ -15,13 +17,31 @@ func main() {
 	// 2-filter. Similarly, each p-filter yields its first output (the next prime)
 	// to main while its subsequent yields go to the enxt filter for that next
 	// prime.
-	next := counter()
+	primes(10)
+	debug.SetTraceback("all")
 	for i := 0; i < 10; i++ {
+		runtime.Gosched()
+	}
+	fmt.Println(runtime.NumGoroutine(), "goroutines")
+}
+
+func primes(n int) {
+	next, cancel := counter()
+	defer cancel()
+	for range n {
+		// If the corotuine panics, then it comes back in the next()
+		// call. And the deferred cancel() calls clean up everything.
+		//
+		// If the coroutine was resumed in `filter`, then the panic
+		// will propogate up to the waiting `filter` coroutine until
+		// it gets to `prime`.
 		p, _ := next(true)
 		fmt.Println(p)
-		next = filter(p, next)
+		next, cancel = filter(p, next)
+		// Don't forget, this defer doesn't end up running
+		// until after primes() is complete...
+		defer cancel()
 	}
-	next(false)
 }
 
 // The code yields a value by passing it to yield and then receives
@@ -32,7 +52,7 @@ func main() {
 // New turns this loop into a function that is the inverse of yield:
 // a `func(bool) int` that can be called with true to obtain the next value,
 // or shutdown with false.
-func counter() func(bool) (int, bool) {
+func counter() (func(bool) (int, bool), func()) {
 	return coro.New(func(more bool, yield func(int) bool) int {
 		for i := 2; more; i++ {
 			more = yield(i)
@@ -41,7 +61,7 @@ func counter() func(bool) (int, bool) {
 	})
 }
 
-func filter(p int, next func(bool) (int, bool)) (filtered func(bool) (int, bool)) {
+func filter(p int, next func(bool) (int, bool)) (func(bool) (int, bool), func()) {
 	return coro.New(func(more bool, yield func(int) bool) int {
 		for more {
 			n, _ := next(true)
