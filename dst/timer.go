@@ -1,0 +1,39 @@
+package dst
+
+import (
+	"container/heap"
+	"time"
+)
+
+type Timer struct {
+	CurTime   time.Time
+	Scheduler *TaskScheduler
+	Events    EventPriority
+}
+
+func NewTimer(gen *Generator, sched *TaskScheduler) *Timer {
+	return &Timer{
+		CurTime:   time.Now(),
+		Scheduler: sched,
+		Events:    make(EventPriority, 0),
+	}
+}
+
+func (t *Timer) AddEvent(f func() bool, name string) {
+	heap.Push(&t.Events, &Event{
+		T: t.CurTime,
+		Task: Task{
+			Name:     name,
+			Callback: f,
+		},
+	})
+}
+
+func (t *Timer) Execute() {
+	if len(t.Events) == 0 {
+		return
+	}
+	e := heap.Pop(&t.Events).(*Event)
+	t.Scheduler.Schedule(e.Task)
+	t.CurTime = e.T
+}
