@@ -1,9 +1,14 @@
 package coro
 
+type msg[T any] struct {
+	panic any
+	val   T
+}
+
 // This is a push iterator?
 func New[In, Out any](f func(in In, yield func(Out) In) Out) (resume func(In) (Out, bool)) {
 	cin := make(chan In)
-	cout := make(chan Out)
+	cout := make(chan msg[Out])
 
 	running := true
 
@@ -16,19 +21,28 @@ func New[In, Out any](f func(in In, yield func(Out) In) Out) (resume func(In) (O
 			return
 		}
 		cin <- in
-		out = <-cout
-		return out, running
+		m := <-cout
+		if m.panic != nil {
+			panic(m.panic)
+		}
+		return m.val, running
 	}
 	yield := func(out Out) In {
-		cout <- out
+		cout <- msg[Out]{val: out}
 		return <-cin
 	}
 
 	// blocks on <-cin, so no opportunity for parallelism
 	go func() {
+		defer func() {
+			if running {
+				running = false
+				cout <- msg[Out]{panic: recover()}
+			}
+		}()
 		out := f(<-cin, yield)
 		running = false
-		cout <- out
+		cout <- msg[Out]{val: out}
 	}()
 
 	return resume
