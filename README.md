@@ -16,7 +16,7 @@
 
 -   **1brc** - My implementation of the [One Billion Row Challenge](https://www.morling.dev/blog/one-billion-row-challenge/), mostly following the optimizations [here](https://benhoyt.com/writings/go-1brc/)
 -   **coro** - Implementing coroutines following Russ Cox's [blog](https://research.swtch.com/coro)
--   **dst** - My (currently) failed attempt at creating a deterministic simulation tester for Go
+-   **dst** - My (currently) failed attempt at creating a deterministic simulation tester for Go, realized that there's no good way to make everything deterministic without something like [Reverie](https://github.com/facebookexperimental/reverie)
 
 ### Misc
 
