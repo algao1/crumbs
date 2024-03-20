@@ -12,12 +12,16 @@ import (
 )
 
 // Inspired by https://benhoyt.com/writings/go-1brc/
+// This solution is used in both Sol4 and Sol5.
 func parseTempIntOptimized(b []byte) (string, int32) {
+	// We know what the format is, the last byte is the
+	// decimal, preceded by '.' and then the ones place.
 	bLen := len(b)
 	temp := int32(b[bLen-3]-'0')*10 + int32(b[bLen-1]-'0')
 
 	cutIdx := bLen - 4
 
+	// Handle all the possible cases.
 	for b[cutIdx] != ';' {
 		if b[cutIdx] == '-' {
 			temp *= -1

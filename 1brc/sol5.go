@@ -19,6 +19,7 @@ func process5(r *io.SectionReader, ch chan map[string]*intStat) {
 	buf := make([]byte, 1024*1024)
 
 	for {
+		// Read a big chunk of data.
 		n, err := r.Read(buf[start:])
 		if err != nil && err != io.EOF {
 			panic("something weird happened")
@@ -27,6 +28,8 @@ func process5(r *io.SectionReader, ch chan map[string]*intStat) {
 			break
 		}
 
+		// Find an appropriate place to cut off the chunk.
+		// Index by the last newline character.
 		chunk := buf[:start+n]
 		newline := bytes.LastIndexByte(chunk, '\n')
 		if newline < 0 {
@@ -86,6 +89,8 @@ func sol5(filePath string, numWorkers int) {
 		pos := int64(i) * step
 		file.Seek(pos, 0)
 
+		// In testing I didn't find that reading a bunch of bytes
+		// at once made this much faster.
 		b := make([]byte, 1)
 		for b[0] != '\n' {
 			file.Read(b)
