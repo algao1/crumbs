@@ -4,6 +4,8 @@ import (
 	"unsafe"
 )
 
+// The use of these global values is probably not
+// the best idea. But it was outlined in the paper.
 var nullNode, deleted, last *AANode
 
 func init() {
