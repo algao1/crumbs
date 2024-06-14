@@ -4,7 +4,7 @@ import "time"
 
 type Task struct {
 	Name     string
-	Callback func() bool
+	Callback func() bool // Determines if the task is to be re-inserted back into the queue.
 }
 
 type Event struct {

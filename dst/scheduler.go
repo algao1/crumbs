@@ -4,6 +4,8 @@ import (
 	"container/list"
 )
 
+// TaskScheduler is a LIRO (last-in-random-out) queue,
+// which is used to randomly execute events.
 type TaskScheduler struct {
 	Tasks     *list.List
 	Generator *Generator

@@ -5,6 +5,7 @@ import (
 	"time"
 )
 
+// Timer is the simulated clock for the simulation.
 type Timer struct {
 	CurTime   time.Time
 	Scheduler *TaskScheduler

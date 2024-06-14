@@ -2,6 +2,9 @@ package dst
 
 import "math/rand"
 
+// Generator is a wrapper around rand.Source,
+// and is responsible for generating all randomness
+// within the simulation.
 type Generator struct {
 	r rand.Source
 }

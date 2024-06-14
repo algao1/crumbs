@@ -26,7 +26,7 @@ func NewSimulator(seed int64) *Simulator {
 
 func (s *Simulator) Run() {
 	for {
-		// Could make this better??
+		// TODO: Can probably make this more customizable.
 		for range s.Generator.Rand() % 5 {
 			s.Timer.Execute()
 		}
