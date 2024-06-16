@@ -35,15 +35,9 @@ func main() {
 
 func PrintHelloWorld(sim *dst.Simulator) {
 	sim.Spawn(func(yield func()) {
-		PrintWorld(sim)
 		yield()
 		fmt.Println("Hello")
-	})
-}
-
-func PrintWorld(sim *dst.Simulator) {
-	sim.Spawn(func(yield func()) {
-		fmt.Println("World")
 		yield()
+		fmt.Println("World")
 	})
 }

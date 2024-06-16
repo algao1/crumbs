@@ -30,7 +30,7 @@ func (s *Simulator) Run() {
 		for range s.Generator.Rand() % 5 {
 			s.Timer.Execute()
 		}
-		for range s.Generator.Rand() % 5 {
+		for range s.Generator.Rand() % 50 {
 			s.Scheduler.Execute()
 		}
 
