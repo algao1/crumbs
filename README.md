@@ -20,4 +20,4 @@
 
 ### Misc
 
--   **p2p_rpc** - A toy implementation of a peer-to-peer (p2p) network over gRPC using [Consul](https://github.com/hashicorp/consul) for service discovery.
+-   **p2p-rpc** - A toy implementation of a peer-to-peer (p2p) network over gRPC using [Consul](https://github.com/hashicorp/consul) for service discovery.

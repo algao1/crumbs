@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"crumbs/p2p_rpc/node"
+	"crumbs/p2p-rpc/node"
 	"log"
 	"math/rand"
 	"os"

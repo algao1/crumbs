@@ -2,7 +2,7 @@ package node
 
 import (
 	"context"
-	"crumbs/p2p_rpc/service"
+	"crumbs/p2p-rpc/service"
 	"fmt"
 	"log"
 	"net"
