@@ -3,6 +3,7 @@ module crumbs
 go 1.22
 
 require (
+	github.com/eapache/queue/v2 v2.0.0-20230407133247-75960ed334e4
 	github.com/hashicorp/consul/api v1.20.0
 	github.com/jamiealquiza/tachymeter v2.0.0+incompatible
 	github.com/pingcap/go-ycsb v1.0.1
