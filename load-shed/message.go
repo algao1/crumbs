@@ -1,8 +1,11 @@
 package main
 
+import "time"
+
 type Message struct {
-	Payload  any
-	Priority int
+	Payload   any
+	Priority  int
+	CreatedAt time.Time
 }
 
 type MessageQueue []*Message

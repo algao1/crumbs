@@ -3,6 +3,7 @@ package main
 import (
 	"container/heap"
 	"fmt"
+	"math"
 	"math/rand"
 	"sync"
 	"time"
@@ -11,28 +12,38 @@ import (
 )
 
 // TODO:
-// - Scheduler + Consumers
 // - Auto-Tuner
+//		- https://github.com/DataDog/sketches-go
 // - Priority + Cohorts
 // - Graphing
 
+const (
+	// Values taken directly from Uber's blog.
+	CALIBRATION_PERIOD = 500 * time.Millisecond
+	REPORT_PERIOD      = 1 * time.Second
+	LOOKBACK_LENGTH    = int(60 * time.Second / CALIBRATION_PERIOD)
+	KP                 = 0.1
+	KI                 = 1.4
+	// Temporary constants.
+	OPTIMAL_CONCURRENCY = 20
+)
+
 func main() {
 	pid := NewPIDController()
-	prod := NewProducer(50)
+	prod := NewProducer(500)
 	prod.Run()
 
 	ls := &LoadShedder{
-		inCh: prod.Out(),
-		pid:  pid,
-		pq:   make(MessageQueue, 0),
+		inCh:  prod.Out(),
+		pid:   pid,
+		sched: NewScheduler(50),
+		pq:    make(MessageQueue, 0),
 	}
 	ls.Run()
 
-	time.Sleep(3 * time.Second)
-	// prod.SetRPS(120)
-	// time.Sleep(10 * time.Second)
-	prod.SetRPS(300)
-	time.Sleep(30 * time.Second)
+	time.Sleep(5 * time.Second)
+	prod.SetRPS(3000)
+	time.Sleep(60 * time.Second)
 }
 
 type Producer struct {
@@ -56,7 +67,9 @@ func (p *Producer) Run() {
 	go func() {
 		for {
 			// TODO: Generate messages with different priority here.
-			p.outCh <- Message{}
+			p.outCh <- Message{
+				CreatedAt: time.Now(),
+			}
 			p.mu.Lock()
 			delay := time.Second / time.Duration(p.rps)
 			time.Sleep(delay)
@@ -76,13 +89,17 @@ type LoadShedder struct {
 	inCh chan Message
 	// outCh     chan Message
 	pid         *PIDController
+	sched       *Scheduler
 	pq          MessageQueue
 	rejectRatio float64
 
 	// stats
-	in       uint
-	out      uint
-	rejected uint
+	in            uint
+	out           uint
+	reportIn      uint
+	reportOut     uint
+	reportReject  uint
+	reportTimeout uint
 }
 
 func (ls *LoadShedder) Run() {
@@ -98,8 +115,9 @@ func (ls *LoadShedder) ingest() {
 		if rand.Float64() > ls.rejectRatio {
 			heap.Push(&ls.pq, &m)
 			ls.in++
+			ls.reportIn++
 		} else {
-			ls.rejected++
+			ls.reportReject++
 		}
 		ls.mu.Unlock()
 	}
@@ -108,32 +126,49 @@ func (ls *LoadShedder) ingest() {
 func (ls *LoadShedder) route() {
 	for range time.Tick(10 * time.Millisecond) {
 		ls.mu.Lock()
-		if ls.pq.Len() > 0 {
-			heap.Pop(&ls.pq)
+		for ls.pq.Len() > 0 {
+			if ls.pq[0].CreatedAt.Add(1 * time.Second).Before(time.Now()) {
+				heap.Pop(&ls.pq)
+				ls.reportTimeout++
+				continue
+			}
+
+			if !ls.sched.CanHandle() {
+				break
+			}
+
+			msg := heap.Pop(&ls.pq).(*Message)
 			ls.out++
+			ls.reportOut++
+			ls.sched.Handle(msg)
 		}
 		ls.mu.Unlock()
 	}
 }
 
 func (ls *LoadShedder) calibrate() {
-	for range time.Tick(500 * time.Millisecond) {
+	for range time.Tick(CALIBRATION_PERIOD) {
 		ls.mu.Lock()
-		ls.rejectRatio = ls.pid.RejectRatio(int(ls.in), int(ls.out), min(10, len(ls.pq)), 10)
+		inflight, inflightLimit := ls.sched.Params()
+		ls.rejectRatio = ls.pid.RejectRatio(int(ls.in), int(ls.out), inflight, inflightLimit)
+		ls.in = 0
+		ls.out = 0
 		ls.mu.Unlock()
 	}
 }
 
 func (ls *LoadShedder) report() {
-	for range time.Tick(1 * time.Second) {
+	for range time.Tick(REPORT_PERIOD) {
 		ls.mu.Lock()
+		inflight, inflightLimit := ls.sched.Params()
 		fmt.Printf(
-			"queue: %d, in: %d, out: %d, rejected: %d, ratio: %.3f\n",
-			ls.pq.Len(), ls.in, ls.out, ls.rejected, ls.rejectRatio,
+			"queue: %d, inflight: (%d/%d), in: %d, out: %d, rejected: %d, timeout: %d, ratio: %.3f\n",
+			ls.pq.Len(), inflight, inflightLimit, ls.reportIn, ls.reportOut, ls.reportReject, ls.reportTimeout, ls.rejectRatio,
 		)
-		ls.in = 0
-		ls.out = 0
-		ls.rejected = 0
+		ls.reportIn = 0
+		ls.reportOut = 0
+		ls.reportReject = 0
+		ls.reportTimeout = 0
 		ls.mu.Unlock()
 	}
 }
@@ -148,30 +183,63 @@ func NewPIDController() *PIDController {
 	}
 }
 
-func (p *PIDController) RejectRatio(in, out, inFlight, inFlightLimit int) float64 {
+func (p *PIDController) RejectRatio(in, out, inflight, inflightLimit int) float64 {
 	denom := float64(out)
 	if denom == 0 {
-		denom = float64(inFlightLimit)
+		denom = float64(inflightLimit)
 	}
 
-	const (
-		Kp = 0.1
-		Ki = 0.25
-	)
-
-	freeInFlight := float64(inFlightLimit - inFlight)
-	errVal := (float64(in) - float64(out) - freeInFlight) / denom
-	pTerm := Kp * errVal
+	freeInflight := float64(inflightLimit - inflight)
+	errVal := (float64(in) - float64(out) - freeInflight) / denom
 
 	p.history.Add(errVal)
-	if p.history.Length() > 30 {
+	if p.history.Length() > LOOKBACK_LENGTH {
 		p.history.Remove()
 	}
 
+	pTerm := KP * errVal
 	iTerm := 0.0
 	for i := range p.history.Length() {
-		iTerm += Ki * p.history.Get(i)
+		iTerm += KI * p.history.Get(i)
 	}
 
-	return pTerm + iTerm
+	// Asymptotically bound by 1, so that we are always letting
+	// some requests through.
+	return 1 - math.Exp(-pTerm-iTerm)
+}
+
+type Scheduler struct {
+	mu            sync.Mutex
+	inflight      int
+	inflightLimit int
+}
+
+func NewScheduler(limit int) *Scheduler {
+	return &Scheduler{inflightLimit: limit}
+}
+
+func (s *Scheduler) Params() (int, int) {
+	return s.inflight, s.inflightLimit
+}
+
+func (s *Scheduler) CanHandle() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.inflight < s.inflightLimit
+}
+
+func (s *Scheduler) Handle(msg *Message) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.inflight++
+
+	go func(inflight int) {
+		baseLatency := time.Duration(2*inflight) * time.Millisecond
+		incrLatency := time.Duration(math.Exp(float64(inflight)/OPTIMAL_CONCURRENCY)) * time.Millisecond
+		time.Sleep(baseLatency + incrLatency)
+
+		s.mu.Lock()
+		s.inflight--
+		s.mu.Unlock()
+	}(s.inflight)
 }
