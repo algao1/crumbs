@@ -8,42 +8,51 @@ import (
 	"sync"
 	"time"
 
+	"github.com/DataDog/sketches-go/ddsketch"
 	"github.com/eapache/queue/v2"
+	"gonum.org/v1/gonum/stat"
 )
 
 // TODO:
-// - Auto-Tuner
-//		- https://github.com/DataDog/sketches-go
-// - Priority + Cohorts
+// - Shed by priority + cohorts
 // - Graphing
 
 const (
 	// Values taken directly from Uber's blog.
+	// PID controller values.
 	CALIBRATION_PERIOD = 500 * time.Millisecond
 	REPORT_PERIOD      = 1 * time.Second
 	LOOKBACK_LENGTH    = int(60 * time.Second / CALIBRATION_PERIOD)
 	KP                 = 0.1
 	KI                 = 1.4
+	// Auto-tuner values.
+	SAMPLE_QUANTILE          = 0.9
+	MIN_INTERVAL_COUNT       = 250
+	MIN_INTERVAL_TIME        = 3 * time.Second
+	LIMIT_CALIBRATION_PERIOD = 5 * time.Second
 	// Temporary constants.
-	OPTIMAL_CONCURRENCY = 20
+	LATENCY_MODIFIER     = 10 // Smaller -> larger latency.
+	MIN_CONCURRENT_LIMIT = 10
 )
 
 func main() {
 	pid := NewPIDController()
 	prod := NewProducer(500)
-	prod.Run()
-
+	sched := NewScheduler(0)
 	ls := &LoadShedder{
 		inCh:  prod.Out(),
 		pid:   pid,
-		sched: NewScheduler(50),
+		tuner: NewAutoTuner(50, sched),
+		sched: sched,
 		pq:    make(MessageQueue, 0),
 	}
+
 	ls.Run()
+	prod.Run()
 
 	time.Sleep(5 * time.Second)
 	prod.SetRPS(3000)
-	time.Sleep(60 * time.Second)
+	time.Sleep(120 * time.Second)
 }
 
 type Producer struct {
@@ -85,13 +94,13 @@ func (p *Producer) SetRPS(rps float64) {
 }
 
 type LoadShedder struct {
-	mu   sync.Mutex
-	inCh chan Message
-	// outCh     chan Message
-	pid         *PIDController
-	sched       *Scheduler
-	pq          MessageQueue
+	mu          sync.Mutex
+	inCh        chan Message
 	rejectRatio float64
+	pq          MessageQueue
+	sched       *Scheduler
+	pid         *PIDController
+	tuner       *AutoTuner
 
 	// stats
 	in            uint
@@ -140,7 +149,9 @@ func (ls *LoadShedder) route() {
 			msg := heap.Pop(&ls.pq).(*Message)
 			ls.out++
 			ls.reportOut++
-			ls.sched.Handle(msg)
+			ls.sched.Handle(msg, func(latency float64) {
+				ls.tuner.Add(latency)
+			})
 		}
 		ls.mu.Unlock()
 	}
@@ -208,8 +219,116 @@ func (p *PIDController) RejectRatio(in, out, inflight, inflightLimit int) float6
 	return 1 - math.Exp(-pTerm-iTerm)
 }
 
+type LatencyInterval struct {
+	maxInflight int
+	sketch      *ddsketch.DDSketch
+}
+
+type AutoTuner struct {
+	mu            sync.Mutex
+	sched         *Scheduler
+	sketch        *ddsketch.DDSketch
+	intervalStart time.Time
+	limit         int
+	targetLatency float64
+	history       *queue.Queue[LatencyInterval]
+}
+
+func NewAutoTuner(limit int, sched *Scheduler) *AutoTuner {
+	sketch, _ := ddsketch.NewDefaultDDSketch(0.1)
+	at := &AutoTuner{
+		sched:         sched,
+		sketch:        sketch,
+		intervalStart: time.Now(),
+		limit:         limit,
+		targetLatency: 9999,
+		history:       queue.New[LatencyInterval](),
+	}
+	sched.SetLimit(limit)
+	go at.periodicallyAdjustLimit()
+	return at
+}
+
+func (at *AutoTuner) Add(latency float64) {
+	at.mu.Lock()
+	defer at.mu.Unlock()
+
+	at.sketch.Add(float64(latency))
+	at.targetLatency = min(at.targetLatency, latency)
+
+	if at.sketch.GetCount() > MIN_INTERVAL_COUNT && time.Since(at.intervalStart) > MIN_INTERVAL_TIME {
+		at.history.Add(LatencyInterval{
+			maxInflight: at.sched.GetResetMaxInflight(),
+			sketch:      at.sketch.Copy(),
+		})
+
+		if at.history.Length() > 50 {
+			at.history.Remove()
+		}
+		at.resetThreshold()
+		at.sketch.Clear()
+		at.intervalStart = time.Now()
+	}
+}
+
+func (at *AutoTuner) resetThreshold() {
+	xs := make([]float64, at.history.Length())
+	ys := make([]float64, at.history.Length())
+	ws := make([]float64, at.history.Length())
+
+	var err error
+	for i := range at.history.Length() {
+		xs[i], err = at.history.Get(i).sketch.GetValueAtQuantile(0.9)
+		if err != nil {
+			continue
+		}
+		ys[i] = float64(at.history.Get(i).maxInflight) / xs[i]
+		ws[i] = 1
+	}
+
+	cov := stat.Covariance(xs, ys, ws)
+	if cov < 0 {
+		at.setLimit(at.limit - 1)
+	}
+	at.targetLatency = 9999
+}
+
+func (at *AutoTuner) periodicallyAdjustLimit() {
+	for range time.Tick(LIMIT_CALIBRATION_PERIOD) {
+		at.mu.Lock()
+		if at.history.Length() == 0 {
+			at.mu.Unlock()
+			continue
+		}
+
+		// TODO: These threshold values are kinda arbitrary, the blog
+		// doesn't really mention them?
+		bottomThresh := -2 * math.Log10(float64(at.limit)/100)
+		upperThresh := -4 * math.Log10(float64(at.limit)/100)
+
+		q, _ := at.history.Peek().sketch.GetValueAtQuantile(SAMPLE_QUANTILE)
+		v := q / at.targetLatency
+
+		fmt.Println(q, v, bottomThresh, upperThresh)
+
+		if v < bottomThresh {
+			at.setLimit(at.limit + 1)
+		} else if v > upperThresh {
+			at.setLimit(at.limit - 1)
+		}
+		at.mu.Unlock()
+	}
+}
+
+func (at *AutoTuner) setLimit(limit int) {
+	at.limit = limit
+	at.limit = max(at.limit, MIN_CONCURRENT_LIMIT)
+	at.sched.SetLimit(at.limit)
+}
+
 type Scheduler struct {
 	mu            sync.Mutex
+	maxInflight   int
 	inflight      int
 	inflightLimit int
 }
@@ -218,7 +337,24 @@ func NewScheduler(limit int) *Scheduler {
 	return &Scheduler{inflightLimit: limit}
 }
 
+func (s *Scheduler) SetLimit(limit int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.inflightLimit = limit
+}
+
+func (s *Scheduler) GetResetMaxInflight() int {
+	// TODO: This is maybe not the most elegant design.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ret := s.maxInflight
+	s.maxInflight = 0
+	return ret
+}
+
 func (s *Scheduler) Params() (int, int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.inflight, s.inflightLimit
 }
 
@@ -228,15 +364,19 @@ func (s *Scheduler) CanHandle() bool {
 	return s.inflight < s.inflightLimit
 }
 
-func (s *Scheduler) Handle(msg *Message) {
+func (s *Scheduler) Handle(msg *Message, doneFn func(float64)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.inflight++
+	s.maxInflight = max(s.maxInflight, s.inflight)
 
 	go func(inflight int) {
-		baseLatency := time.Duration(2*inflight) * time.Millisecond
-		incrLatency := time.Duration(math.Exp(float64(inflight)/OPTIMAL_CONCURRENCY)) * time.Millisecond
-		time.Sleep(baseLatency + incrLatency)
+		baseLatency := time.Duration(100) * time.Millisecond
+		incrLatency := time.Duration(math.Exp(float64(inflight)/LATENCY_MODIFIER)) * time.Millisecond
+		latency := baseLatency + incrLatency
+		time.Sleep(latency)
+
+		doneFn(latency.Seconds())
 
 		s.mu.Lock()
 		s.inflight--

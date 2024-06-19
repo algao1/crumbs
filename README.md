@@ -16,7 +16,8 @@
 
 -   **1brc** - My implementation of the [One Billion Row Challenge](https://www.morling.dev/blog/one-billion-row-challenge/), mostly following the optimizations [here](https://benhoyt.com/writings/go-1brc/).
 -   **coro** - Implementing coroutines following Russ Cox's [blog](https://research.swtch.com/coro).
--   **dst** - My unsuccessful attempt at creating a deterministic simulation tester for Go (see [Reverie](https://github.com/facebookexperimental/reverie)).
+-   **dst** - A unsuccessful attempt at creating a deterministic simulation tester for Go (see [Reverie](https://github.com/facebookexperimental/reverie)).
+-   **load-shed** - Implementation of Uber's [Cinnamon Load Shedder](https://www.uber.com/blog/cinnamon-using-century-old-tech-to-build-a-mean-load-shedder/?uclick_id=0f04f49d-7cb2-4574-b24f-0fafec19a257), with some liberties taken.
 
 ### Misc
 

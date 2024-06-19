@@ -10,7 +10,7 @@ require (
 	github.com/rodaine/table v1.1.0
 	github.com/stretchr/testify v1.8.4
 	google.golang.org/grpc v1.54.0
-	google.golang.org/protobuf v1.30.0
+	google.golang.org/protobuf v1.32.0
 )
 
 require (
@@ -25,6 +25,7 @@ require (
 )
 
 require (
+	github.com/DataDog/sketches-go v1.4.5
 	github.com/armon/go-metrics v0.0.0-20180917152333-f0300d1749da // indirect
 	github.com/fatih/color v1.9.0
 	github.com/golang/protobuf v1.5.2 // indirect
@@ -38,9 +39,10 @@ require (
 	github.com/mattn/go-isatty v0.0.12 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
-	golang.org/x/exp v0.0.0-20230801115018-d63ba01acd4b
+	golang.org/x/exp v0.0.0-20231110203233-9a3e6036ecaa
 	golang.org/x/net v0.8.0 // indirect
-	golang.org/x/sys v0.6.0 // indirect
-	golang.org/x/text v0.8.0 // indirect
+	golang.org/x/sys v0.14.0 // indirect
+	golang.org/x/text v0.14.0 // indirect
+	gonum.org/v1/gonum v0.15.0
 	google.golang.org/genproto v0.0.0-20230110181048-76db0878b65f // indirect
 )
