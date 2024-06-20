@@ -30,22 +30,15 @@ const (
 	MIN_INTERVAL_COUNT       = 250
 	MIN_INTERVAL_TIME        = 3 * time.Second
 	LIMIT_CALIBRATION_PERIOD = 5 * time.Second
+
 	// Temporary constants.
 	LATENCY_MODIFIER     = 10 // Smaller -> larger latency.
 	MIN_CONCURRENT_LIMIT = 10
 )
 
 func main() {
-	pid := NewPIDController()
 	prod := NewProducer(500)
-	sched := NewScheduler(0)
-	ls := &LoadShedder{
-		inCh:  prod.Out(),
-		pid:   pid,
-		tuner: NewAutoTuner(50, sched),
-		sched: sched,
-		pq:    make(MessageQueue, 0),
-	}
+	ls := NewLoadShedder(prod, 50)
 
 	ls.Run()
 	prod.Run()
@@ -111,6 +104,17 @@ type LoadShedder struct {
 	reportTimeout uint
 }
 
+func NewLoadShedder(prod *Producer, maxConcurrency int) *LoadShedder {
+	sched := NewScheduler(0)
+	return &LoadShedder{
+		inCh:  prod.Out(),
+		pid:   NewPIDController(),
+		tuner: NewAutoTuner(maxConcurrency, sched),
+		sched: sched,
+		pq:    make(MessageQueue, 0),
+	}
+}
+
 func (ls *LoadShedder) Run() {
 	go ls.ingest()
 	go ls.route()
@@ -171,11 +175,13 @@ func (ls *LoadShedder) calibrate() {
 func (ls *LoadShedder) report() {
 	for range time.Tick(REPORT_PERIOD) {
 		ls.mu.Lock()
+
 		inflight, inflightLimit := ls.sched.Params()
+		reqLatency := ls.sched.GetResetLatency()
 		fmt.Printf(
-			"queue: %d, inflight: (%d/%d), in: %d, out: %d, rejected: %d, timeout: %d, ratio: %.3f\n",
-			ls.pq.Len(), inflight, inflightLimit, ls.reportIn, ls.reportOut, ls.reportReject, ls.reportTimeout, ls.rejectRatio,
-		)
+			"queue: %d, inflight: (%d/%d), in: %d, out: %d, rejected: %d, timeout: %d, ratio: %.3f, latency: %.3f\n",
+			ls.pq.Len(), inflight, inflightLimit, ls.reportIn, ls.reportOut, ls.reportReject, ls.reportTimeout, ls.rejectRatio, reqLatency)
+
 		ls.reportIn = 0
 		ls.reportOut = 0
 		ls.reportReject = 0
@@ -309,7 +315,7 @@ func (at *AutoTuner) periodicallyAdjustLimit() {
 		q, _ := at.history.Peek().sketch.GetValueAtQuantile(SAMPLE_QUANTILE)
 		v := q / at.targetLatency
 
-		fmt.Println(q, v, bottomThresh, upperThresh)
+		// fmt.Println(q, v, bottomThresh, upperThresh)
 
 		if v < bottomThresh {
 			at.setLimit(at.limit + 1)
@@ -331,10 +337,15 @@ type Scheduler struct {
 	maxInflight   int
 	inflight      int
 	inflightLimit int
+	latencies     *ddsketch.DDSketch
 }
 
 func NewScheduler(limit int) *Scheduler {
-	return &Scheduler{inflightLimit: limit}
+	sketch, _ := ddsketch.NewDefaultDDSketch(0.1)
+	return &Scheduler{
+		inflightLimit: limit,
+		latencies:     sketch,
+	}
 }
 
 func (s *Scheduler) SetLimit(limit int) {
@@ -376,10 +387,21 @@ func (s *Scheduler) Handle(msg *Message, doneFn func(float64)) {
 		latency := baseLatency + incrLatency
 		time.Sleep(latency)
 
+		// TODO: Keep track of latency sketch for reporting.
+		s.latencies.Add(latency.Seconds())
 		doneFn(latency.Seconds())
 
 		s.mu.Lock()
 		s.inflight--
 		s.mu.Unlock()
 	}(s.inflight)
+}
+
+func (s *Scheduler) GetResetLatency() float64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	latency, _ := s.latencies.GetValueAtQuantile(SAMPLE_QUANTILE)
+	s.latencies.Clear()
+	return latency
 }
