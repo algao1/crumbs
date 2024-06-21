@@ -63,9 +63,9 @@ func main() {
 	ls.Run()
 	prod.Run()
 
-	time.Sleep(5 * time.Second)
+	time.Sleep(30 * time.Second)
 	prod.SetRPS(3000)
-	time.Sleep(120 * time.Second)
+	time.Sleep(90 * time.Second)
 }
 
 type Producer struct {
@@ -407,7 +407,7 @@ func (s *Scheduler) Handle(msg *Message, doneFn func(float64)) {
 	s.maxInflight = max(s.maxInflight, s.inflight)
 
 	go func(inflight int) {
-		baseLatency := time.Duration(100) * time.Millisecond
+		baseLatency := time.Duration(100+50*rand.NormFloat64()) * time.Millisecond
 		incrLatency := time.Duration(math.Exp(float64(inflight)/LATENCY_MODIFIER)) * time.Millisecond
 		latency := baseLatency + incrLatency
 		time.Sleep(latency)
