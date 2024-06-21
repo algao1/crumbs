@@ -13,12 +13,31 @@ import (
 	"gonum.org/v1/gonum/stat"
 )
 
-// TODO:
-// - Shed by priority + cohorts
-// - Graphing
+// Basic Message Flow:
+//
+// Producer -> Rejector -> Priority Queue -> Scheduler -> Consumer
+//			   ^^^^^^^^						 ^^^^^^^^^
+//			  (PID Controller)				(Auto-Tuner)
+//
+// The PID controller attempts to find a good ratio of requests to
+// reject/shed so that the queue is not overwhelmed.
+// The auto-tuner measures latency and adjusts the maximum number
+// of concurrent requests to prevent compute from being overloaded.
+// The consumer simulates request latencies using an exponential
+// function, this has some side effects such as making the auto-tuner
+// overly aggressive.
+//
+// There is a small problem currently where the auto-tuner will
+// aggressively decrease the inflight limit in attempt to decrease
+// latency (primarily from resetThreshold), since the covariance
+// is negative.
+// To combat this, we might want to more carefully consider the tradeoff
+// between latency and throughput, include some measure of CPU utilization
+// to ensure that it is properly utilized, or raise the minimum limit.
 
 const (
 	// Values taken directly from Uber's blog.
+	// https://www.uber.com/en-CA/blog/cinnamon-using-century-old-tech-to-build-a-mean-load-shedder/
 	// PID controller values.
 	CALIBRATION_PERIOD = 500 * time.Millisecond
 	REPORT_PERIOD      = 1 * time.Second
@@ -32,8 +51,9 @@ const (
 	LIMIT_CALIBRATION_PERIOD = 5 * time.Second
 
 	// Temporary constants.
-	LATENCY_MODIFIER     = 10 // Smaller -> larger latency.
-	MIN_CONCURRENT_LIMIT = 10
+	QUEUE_EXPIRATION_DURATION = 1 * time.Second
+	LATENCY_MODIFIER          = 10 // Smaller -> larger latency.
+	MIN_CONCURRENT_LIMIT      = 10
 )
 
 func main() {
@@ -96,8 +116,9 @@ type LoadShedder struct {
 	tuner       *AutoTuner
 
 	// stats
-	in            uint
-	out           uint
+	in  uint
+	out uint
+	// report stats
 	reportIn      uint
 	reportOut     uint
 	reportReject  uint
@@ -125,6 +146,7 @@ func (ls *LoadShedder) Run() {
 func (ls *LoadShedder) ingest() {
 	for m := range ls.inCh {
 		ls.mu.Lock()
+		// TODO: Reject by priority and by cohort.
 		if rand.Float64() > ls.rejectRatio {
 			heap.Push(&ls.pq, &m)
 			ls.in++
@@ -140,7 +162,7 @@ func (ls *LoadShedder) route() {
 	for range time.Tick(10 * time.Millisecond) {
 		ls.mu.Lock()
 		for ls.pq.Len() > 0 {
-			if ls.pq[0].CreatedAt.Add(1 * time.Second).Before(time.Now()) {
+			if ls.pq[0].CreatedAt.Add(QUEUE_EXPIRATION_DURATION).Before(time.Now()) {
 				heap.Pop(&ls.pq)
 				ls.reportTimeout++
 				continue
@@ -149,13 +171,13 @@ func (ls *LoadShedder) route() {
 			if !ls.sched.CanHandle() {
 				break
 			}
-
 			msg := heap.Pop(&ls.pq).(*Message)
-			ls.out++
-			ls.reportOut++
 			ls.sched.Handle(msg, func(latency float64) {
 				ls.tuner.Add(latency)
 			})
+
+			ls.out++
+			ls.reportOut++
 		}
 		ls.mu.Unlock()
 	}
@@ -173,6 +195,7 @@ func (ls *LoadShedder) calibrate() {
 }
 
 func (ls *LoadShedder) report() {
+	// TODO: Add graphing support?
 	for range time.Tick(REPORT_PERIOD) {
 		ls.mu.Lock()
 
@@ -180,7 +203,8 @@ func (ls *LoadShedder) report() {
 		reqLatency := ls.sched.GetResetLatency()
 		fmt.Printf(
 			"queue: %d, inflight: (%d/%d), in: %d, out: %d, rejected: %d, timeout: %d, ratio: %.3f, latency: %.3f\n",
-			ls.pq.Len(), inflight, inflightLimit, ls.reportIn, ls.reportOut, ls.reportReject, ls.reportTimeout, ls.rejectRatio, reqLatency)
+			ls.pq.Len(), inflight, inflightLimit, ls.reportIn, ls.reportOut, ls.reportReject, ls.reportTimeout, ls.rejectRatio, reqLatency,
+		)
 
 		ls.reportIn = 0
 		ls.reportOut = 0
@@ -220,8 +244,10 @@ func (p *PIDController) RejectRatio(in, out, inflight, inflightLimit int) float6
 		iTerm += KI * p.history.Get(i)
 	}
 
-	// Asymptotically bound by 1, so that we are always letting
-	// some requests through.
+	// We don't include the D term since the paper mentions that its not
+	// that useful.
+	// Asymptotically bound result by 1, so that we are more likely to let
+	// some requests through when value is large.
 	return 1 - math.Exp(-pTerm-iTerm)
 }
 
@@ -262,7 +288,8 @@ func (at *AutoTuner) Add(latency float64) {
 	at.sketch.Add(float64(latency))
 	at.targetLatency = min(at.targetLatency, latency)
 
-	if at.sketch.GetCount() > MIN_INTERVAL_COUNT && time.Since(at.intervalStart) > MIN_INTERVAL_TIME {
+	if at.sketch.GetCount() > MIN_INTERVAL_COUNT &&
+		time.Since(at.intervalStart) > MIN_INTERVAL_TIME {
 		at.history.Add(LatencyInterval{
 			maxInflight: at.sched.GetResetMaxInflight(),
 			sketch:      at.sketch.Copy(),
@@ -314,8 +341,6 @@ func (at *AutoTuner) periodicallyAdjustLimit() {
 
 		q, _ := at.history.Peek().sketch.GetValueAtQuantile(SAMPLE_QUANTILE)
 		v := q / at.targetLatency
-
-		// fmt.Println(q, v, bottomThresh, upperThresh)
 
 		if v < bottomThresh {
 			at.setLimit(at.limit + 1)
