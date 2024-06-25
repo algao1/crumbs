@@ -6,6 +6,7 @@ require (
 	github.com/eapache/queue/v2 v2.0.0-20230407133247-75960ed334e4
 	github.com/hashicorp/consul/api v1.20.0
 	github.com/jamiealquiza/tachymeter v2.0.0+incompatible
+	github.com/magiconair/properties v1.8.0
 	github.com/pingcap/go-ycsb v1.0.1
 	github.com/rodaine/table v1.1.0
 	github.com/stretchr/testify v1.8.4
@@ -15,7 +16,6 @@ require (
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/magiconair/properties v1.8.0 // indirect
 	github.com/mattn/go-runewidth v0.0.9 // indirect
 	github.com/olekukonko/tablewriter v0.0.5 // indirect
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c // indirect

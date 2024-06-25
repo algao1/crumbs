@@ -4,27 +4,34 @@ import (
 	"unsafe"
 )
 
-// The use of these global values is probably not
-// the best idea. But it was outlined in the paper.
-var nullNode, deleted, last *AANode
+// // The use of these global values is probably not
+// // the best idea. But it was outlined in the paper.
+// var nullNode, deleted, last *AANode
 
-func init() {
-	nullNode = &AANode{
+type AATree struct {
+	root    *AANode
+	deleted *AANode
+	last    *AANode
+	size    int
+	nodes   int
+
+	// This effectively acts like a constant. Not sure why the
+	// implementation doesn't use a null pointer?
+	nullNode *AANode
+}
+
+func NewAATree() *AATree {
+	nullNode := &AANode{
 		Level: 0,
 	}
 	nullNode.Left = nullNode
 	nullNode.Right = nullNode
-}
 
-type AATree struct {
-	Root  *AANode
-	size  int
-	nodes int
-}
-
-func NewAATree() *AATree {
 	return &AATree{
-		Root: nullNode,
+		root:     nullNode,
+		nullNode: nullNode,
+		deleted:  nullNode,
+		last:     nullNode,
 	}
 }
 
@@ -37,19 +44,19 @@ func (aa *AATree) Nodes() int {
 }
 
 func (aa *AATree) Find(key string) ([]byte, bool) {
-	return aa.find(key, aa.Root)
+	return aa.find(key, aa.root)
 }
 
 func (aa *AATree) Insert(key string, val []byte) {
-	aa.Root = aa.insert(aa.Root, key, val)
+	aa.root = aa.insert(aa.root, key, val)
 }
 
 func (aa *AATree) Remove(key string) {
-	aa.Root = aa.remove(aa.Root, key)
+	aa.root = aa.remove(aa.root, key)
 }
 
 func (aa *AATree) Traverse(f func(k string, v []byte)) {
-	aa.traverse(f, aa.Root)
+	aa.traverse(f, aa.root)
 }
 
 const AANODE_SIZE = uint32(unsafe.Sizeof(AANode{}))
@@ -63,7 +70,7 @@ type AANode struct {
 }
 
 func (aa *AATree) traverse(f func(k string, v []byte), an *AANode) {
-	if an == nullNode {
+	if an == aa.nullNode {
 		return
 	}
 	aa.traverse(f, an.Left)
@@ -72,7 +79,7 @@ func (aa *AATree) traverse(f func(k string, v []byte), an *AANode) {
 }
 
 func (aa *AATree) find(k string, an *AANode) ([]byte, bool) {
-	if an == nullNode {
+	if an == aa.nullNode {
 		return nil, false
 	}
 	if an.Key == k {
@@ -85,14 +92,14 @@ func (aa *AATree) find(k string, an *AANode) ([]byte, bool) {
 }
 
 func (aa *AATree) insert(k *AANode, key string, val []byte) *AANode {
-	if k == nullNode {
+	if k == aa.nullNode {
 		aa.size += len(key) + len(val) + int(AANODE_SIZE)
 		aa.nodes++
 		return &AANode{
 			Key:   key,
 			Val:   val,
-			Left:  nullNode,
-			Right: nullNode,
+			Left:  aa.nullNode,
+			Right: aa.nullNode,
 			Level: 1,
 		}
 	}
@@ -112,28 +119,28 @@ func (aa *AATree) insert(k *AANode, key string, val []byte) *AANode {
 }
 
 func (aa *AATree) remove(k *AANode, key string) *AANode {
-	if k != nullNode {
+	if k != aa.nullNode {
 		// Step 1:
 		// Search down the tree, and set pointers last and delete.
-		last = k
+		aa.last = k
 		if key < k.Key {
 			k.Left = aa.remove(k.Left, key)
 		} else {
-			deleted = k
+			aa.deleted = k
 			k.Right = aa.remove(k.Right, key)
 		}
 
-		if k == last {
+		if k == aa.last {
 			// Step 2:
 			// At the bottom of the tree we remove the element
 			// if it is present.
-			if deleted != nullNode && key == deleted.Key {
+			if aa.deleted != aa.nullNode && key == aa.deleted.Key {
 				aa.size -= len(k.Key) + len(k.Val) + int(AANODE_SIZE)
 				aa.nodes--
-				deleted.Key = k.Key
-				deleted.Val = k.Val
-				deleted = nullNode
-				_ = deleted // ignore static check warnings
+				aa.deleted.Key = k.Key
+				aa.deleted.Val = k.Val
+				aa.deleted = aa.nullNode
+				_ = aa.deleted // ignore static check warnings
 				k = k.Right
 			}
 		} else {
