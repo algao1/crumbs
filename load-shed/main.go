@@ -31,6 +31,8 @@ import (
 // aggressively decrease the inflight limit in attempt to decrease
 // latency (primarily from resetThreshold), since the covariance
 // is negative.
+// Note: This might not be true, need to run for a longer period to verify.
+//
 // To combat this, we might want to more carefully consider the tradeoff
 // between latency and throughput, include some measure of CPU utilization
 // to ensure that it is properly utilized, or raise the minimum limit.
@@ -195,7 +197,6 @@ func (ls *LoadShedder) calibrate() {
 }
 
 func (ls *LoadShedder) report() {
-	// TODO: Add graphing support?
 	for range time.Tick(REPORT_PERIOD) {
 		ls.mu.Lock()
 
@@ -412,7 +413,6 @@ func (s *Scheduler) Handle(msg *Message, doneFn func(float64)) {
 		latency := baseLatency + incrLatency
 		time.Sleep(latency)
 
-		// TODO: Keep track of latency sketch for reporting.
 		s.latencies.Add(latency.Seconds())
 		doneFn(latency.Seconds())
 

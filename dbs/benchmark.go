@@ -19,6 +19,8 @@ func init() {
 	flag.Parse()
 }
 
+// TODO: Tear this down and replace it with something better?
+
 func main() {
 	if profile {
 		f, err := os.Create("cpu_profile.pprof")
@@ -43,11 +45,11 @@ func main() {
 		dir   string
 		store kvStore
 	}{
-		// {
-		// 	name:  "Keg",
-		// 	dir:   "data/keg",
-		// 	store: NewKegWrapper("data/keg"),
-		// },
+		{
+			name:  "Keg",
+			dir:   "data/keg",
+			store: NewKegWrapper("data/keg"),
+		},
 		{
 			name:  "LSM",
 			dir:   "data/lsm",
@@ -57,15 +59,17 @@ func main() {
 
 	numOps := 1000000
 
-	for _, db := range dbs {
+	for i, db := range dbs {
+		if i > 0 {
+			fmt.Println()
+		}
+
 		fmt.Printf("Benchmarks for %s\n", db.name)
-		benchPutKeyVals(db.store, numOps, 16)
+		benchPutKeyVals(db.store, numOps)
 		db.store.Close()
-		benchSeqGetKeyVals(db.store, numOps, 16)
+		benchSeqGetKeyVals(db.store, numOps)
 		benchRandGetKeyVals(db.store, numOps)
 		benchConcRandGetKeyVals(db.store, numOps)
-
-		fmt.Println()
 	}
 }
 
@@ -81,7 +85,7 @@ func printBenchmarkResults(name string, elapsed time.Duration, numOps int) {
 	fmt.Printf("%-20s%14s%12d ops%12.0f ops/s\n", name, elapsed, numOps, float64(numOps)/elapsed.Seconds())
 }
 
-func benchPutKeyVals(store kvStore, numOps, strSize int) {
+func benchPutKeyVals(store kvStore, numOps int) {
 	t := time.Now()
 	for i := 0; i < numOps; i++ {
 		val := []byte(fmt.Sprintf("val_%d", i))
@@ -93,7 +97,7 @@ func benchPutKeyVals(store kvStore, numOps, strSize int) {
 	printBenchmarkResults("PutKeyVals", time.Since(t), numOps)
 }
 
-func benchSeqGetKeyVals(store kvStore, numOps, strSize int) {
+func benchSeqGetKeyVals(store kvStore, numOps int) {
 	t := time.Now()
 	for i := 0; i < numOps; i++ {
 		v, err := store.Get(fmt.Sprintf("key_%d", i))
