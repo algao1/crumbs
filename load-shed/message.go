@@ -5,6 +5,7 @@ import "time"
 type Message struct {
 	Payload   any
 	Priority  int
+	Cohort    int
 	CreatedAt time.Time
 }
 
@@ -15,7 +16,7 @@ func (pq MessageQueue) Len() int {
 }
 
 func (pq MessageQueue) Less(i, j int) bool {
-	return pq[i].Priority < pq[j].Priority
+	return pq[i].Priority*NUM_COHORTS+pq[i].Cohort < pq[j].Priority*NUM_COHORTS+pq[j].Cohort
 }
 
 func (pq MessageQueue) Swap(i, j int) {

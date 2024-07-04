@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/DataDog/sketches-go/ddsketch"
+	"github.com/asecurityteam/rolling"
 	"github.com/eapache/queue/v2"
 	"gonum.org/v1/gonum/stat"
 )
@@ -40,6 +41,10 @@ import (
 const (
 	// Values taken directly from Uber's blog.
 	// https://www.uber.com/en-CA/blog/cinnamon-using-century-old-tech-to-build-a-mean-load-shedder/
+	// Rejector values.
+	NUM_PRIORITIES           = 6
+	NUM_COHORTS              = 128
+	PRIORITY_LOOKBACK_LENGTH = 1_000
 	// PID controller values.
 	CALIBRATION_PERIOD = 500 * time.Millisecond
 	REPORT_PERIOD      = 1 * time.Second
@@ -90,9 +95,11 @@ func (p *Producer) Out() chan Message {
 func (p *Producer) Run() {
 	go func() {
 		for {
-			// TODO: Generate messages with different priority here.
+			// Uses 6 tiers for priority, and 128 cohorts like Uber.
 			p.outCh <- Message{
 				CreatedAt: time.Now(),
+				Priority:  rand.Intn(NUM_PRIORITIES),
+				Cohort:    rand.Intn(NUM_COHORTS),
 			}
 			p.mu.Lock()
 			delay := time.Second / time.Duration(p.rps)
@@ -109,13 +116,14 @@ func (p *Producer) SetRPS(rps float64) {
 }
 
 type LoadShedder struct {
-	mu          sync.Mutex
-	inCh        chan Message
-	rejectRatio float64
-	pq          MessageQueue
-	sched       *Scheduler
-	pid         *PIDController
-	tuner       *AutoTuner
+	mu             sync.Mutex
+	inCh           chan Message
+	priorityWindow *rolling.PointPolicy
+	rejectRatio    float64
+	pq             MessageQueue
+	sched          *Scheduler
+	pid            *PIDController
+	tuner          *AutoTuner
 
 	// stats
 	in  uint
@@ -130,11 +138,12 @@ type LoadShedder struct {
 func NewLoadShedder(prod *Producer, maxConcurrency int) *LoadShedder {
 	sched := NewScheduler(0)
 	return &LoadShedder{
-		inCh:  prod.Out(),
-		pid:   NewPIDController(),
-		tuner: NewAutoTuner(maxConcurrency, sched),
-		sched: sched,
-		pq:    make(MessageQueue, 0),
+		inCh:           prod.Out(),
+		priorityWindow: rolling.NewPointPolicy(rolling.NewWindow(PRIORITY_LOOKBACK_LENGTH)),
+		pid:            NewPIDController(),
+		tuner:          NewAutoTuner(maxConcurrency, sched),
+		sched:          sched,
+		pq:             make(MessageQueue, 0),
 	}
 }
 
@@ -148,8 +157,13 @@ func (ls *LoadShedder) Run() {
 func (ls *LoadShedder) ingest() {
 	for m := range ls.inCh {
 		ls.mu.Lock()
-		// TODO: Reject by priority and by cohort.
-		if rand.Float64() > ls.rejectRatio {
+
+		// Unknown what the performance impact of this is...
+		pos := float64(m.Priority*NUM_COHORTS + m.Cohort)
+		ls.priorityWindow.Append(pos)
+		thresh := ls.priorityWindow.Reduce(rolling.FastPercentile(ls.rejectRatio * 100))
+
+		if pos > thresh {
 			heap.Push(&ls.pq, &m)
 			ls.in++
 			ls.reportIn++
@@ -216,12 +230,12 @@ func (ls *LoadShedder) report() {
 }
 
 type PIDController struct {
-	history *queue.Queue[float64]
+	history *rolling.PointPolicy
 }
 
 func NewPIDController() *PIDController {
 	return &PIDController{
-		history: queue.New[float64](),
+		history: rolling.NewPointPolicy(rolling.NewWindow(LOOKBACK_LENGTH)),
 	}
 }
 
@@ -233,17 +247,10 @@ func (p *PIDController) RejectRatio(in, out, inflight, inflightLimit int) float6
 
 	freeInflight := float64(inflightLimit - inflight)
 	errVal := (float64(in) - float64(out) - freeInflight) / denom
-
-	p.history.Add(errVal)
-	if p.history.Length() > LOOKBACK_LENGTH {
-		p.history.Remove()
-	}
+	p.history.Append(errVal)
 
 	pTerm := KP * errVal
-	iTerm := 0.0
-	for i := range p.history.Length() {
-		iTerm += KI * p.history.Get(i)
-	}
+	iTerm := KI * p.history.Reduce(rolling.Sum)
 
 	// We don't include the D term since the paper mentions that its not
 	// that useful.
@@ -413,10 +420,11 @@ func (s *Scheduler) Handle(msg *Message, doneFn func(float64)) {
 		latency := baseLatency + incrLatency
 		time.Sleep(latency)
 
-		s.latencies.Add(latency.Seconds())
 		doneFn(latency.Seconds())
 
 		s.mu.Lock()
+		// We move this here, otherwise concurrent access will panic.
+		s.latencies.Add(latency.Seconds())
 		s.inflight--
 		s.mu.Unlock()
 	}(s.inflight)
