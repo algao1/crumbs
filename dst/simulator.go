@@ -2,6 +2,7 @@ package dst
 
 import (
 	"crumbs/coro"
+	"fmt"
 	"log/slog"
 	"runtime"
 )
@@ -24,13 +25,21 @@ import (
 // The scheduler is just a LIRO (last-in-random-out) queue, and
 // manually yielding inserts the event back into the queue.
 
+const (
+	FUNC_YIELD_PCT = 30
+)
+
 type Simulator struct {
-	Generator *Generator
-	Timer     *Timer
-	Scheduler *TaskScheduler
+	Generator   *Generator
+	Timer       *Timer
+	Scheduler   *TaskScheduler
+	funcCounter int
 }
 
 func NewSimulator(seed int64) *Simulator {
+	// Force Go to use 1 CPU at most. Not needed, but for sanity.
+	runtime.GOMAXPROCS(1)
+
 	gen := NewGenerator(seed)
 	scheduler := NewTaskScheduler(gen)
 	timer := NewTimer(gen, scheduler)
@@ -59,14 +68,20 @@ func (s *Simulator) Run() {
 	}
 }
 
-func (s *Simulator) Spawn(f func(yield func())) {
+func (s *Simulator) Spawn(fn func(yield func())) {
 	pc, _, _, _ := runtime.Caller(1)
-	funcName := runtime.FuncForPC(pc).Name()
+	funcName := runtime.FuncForPC(pc).Name() + fmt.Sprintf("_%d", s.funcCounter)
 
 	resume, _ := coro.New(func(_ bool, yield func(int) bool) int {
-		f(func() {
-			slog.Debug("function yielded", slog.String("func", funcName))
-			yield(0)
+		fn(func() {
+			// We perform the check here, since if we do it outside of fn, then
+			// the yield has a chance of always working, or never working.
+			// Doing it here, means each time yield is called, it has a prob. of
+			// working.
+			if (s.Generator.Rand() % 100) < FUNC_YIELD_PCT {
+				slog.Debug("function yielded", slog.String("func", funcName))
+				yield(0)
+			}
 		})
 		return 0
 	})
@@ -78,4 +93,5 @@ func (s *Simulator) Spawn(f func(yield func())) {
 		},
 		funcName,
 	)
+	s.funcCounter++
 }

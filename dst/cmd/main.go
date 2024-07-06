@@ -15,6 +15,7 @@ func main() {
 		PrintHelloWorld(sim)
 	}
 	sim.Run()
+	sim.Scheduler.Stats()
 }
 
 func PrintHelloWorld(sim *dst.Simulator) {
