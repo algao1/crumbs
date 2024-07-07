@@ -22,8 +22,10 @@ import (
 // time, and a scheduler that schedules events to be processed.
 // Everything is processed in a single thread, which is the simulator.
 
-// The scheduler is just a LIRO (last-in-random-out) queue, and
-// manually yielding inserts the event back into the queue.
+// The scheduler is just a LIRO (last-in-random-out) queue for runnable
+// tasks, and manually yielding inserts the event back into the queue.
+
+// See: https://news.ycombinator.com/item?id=40890035.
 
 const (
 	FUNC_YIELD_PCT = 30
@@ -76,8 +78,8 @@ func (s *Simulator) Spawn(fn func(yield func())) {
 		fn(func() {
 			// We perform the check here, since if we do it outside of fn, then
 			// the yield has a chance of always working, or never working.
-			// Doing it here, means each time yield is called, it has a prob. of
-			// working.
+			// Doing it here, means each time yield is called, it has a probability
+			// of yielding, and being inserted back into the runnable queue.
 			if (s.Generator.Rand() % 100) < FUNC_YIELD_PCT {
 				slog.Debug("function yielded", slog.String("func", funcName))
 				yield(0)
