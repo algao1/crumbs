@@ -21,8 +21,12 @@ func NewTimer(gen *Generator, sched *TaskScheduler) *Timer {
 }
 
 func (t *Timer) AddEvent(f func() bool, name string) {
+	t.AddEventWithDelay(f, name, 0)
+}
+
+func (t *Timer) AddEventWithDelay(f func() bool, name string, delay time.Duration) {
 	heap.Push(&t.Events, &Event{
-		T: t.CurTime,
+		T: t.CurTime.Add(delay),
 		Task: Task{
 			Name:     name,
 			Callback: f,
