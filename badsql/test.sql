@@ -4,3 +4,5 @@ INSERT INTO users VALUES (2, 'Bob');
 INSERT INTO users VALUES (3, 'Eva');
 SELECT name, id FROM users;
 SELECT id, name FROM users;
+SELECT id, name FROM users WHERE id = 2;
+SELECT id + 2, name FROM users WHERE name = 'Alice';

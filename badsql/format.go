@@ -14,11 +14,13 @@ type ColumnType int
 const (
 	TextType ColumnType = iota
 	IntType
+	BoolType
 )
 
 type Cell interface {
 	AsText() string
 	AsInt() int32
+	AsBool() bool
 }
 
 type Results struct {
@@ -44,6 +46,8 @@ func parseColumnType(t sqlparser.ColumnType) (ColumnType, error) {
 		return IntType, nil
 	case sqltypes.Text:
 		return TextType, nil
+	case sqltypes.Bit:
+		return BoolType, nil
 	default:
 		return TextType, fmt.Errorf("unsupported type: %s", t.SQLType())
 	}

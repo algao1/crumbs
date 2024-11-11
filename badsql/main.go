@@ -70,7 +70,7 @@ func (e *Executor) HandleStatement(s string) error {
 			return err
 		}
 	case *sqlparser.Select:
-		var res Results
+		var res *Results
 		res, err := e.db.Select(stmt)
 		if err != nil {
 			return err
@@ -81,9 +81,10 @@ func (e *Executor) HandleStatement(s string) error {
 		for i, row := range res.Rows {
 			data[i] = make([]string, len(row))
 			for j, cell := range row {
-				if res.Columns[j].Type == IntType {
+				switch res.Columns[j].Type {
+				case IntType:
 					data[i][j] = fmt.Sprintf("%d", cell.AsInt())
-				} else if res.Columns[j].Type == TextType {
+				case TextType:
 					data[i][j] = cell.AsText()
 				}
 			}
