@@ -193,15 +193,23 @@ func (b *MemoryBackend) Insert(stmt *sqlparser.Insert) error {
 	if !ok {
 		return fmt.Errorf("table %s does not exist", stmt.Table.Name.CompliantName())
 	}
+	// TODO: Clean this up, and have better errors.
 	if rows, ok := stmt.Rows.(sqlparser.Values); ok {
 		for rowIndex, row := range rows {
 			var cells []MemoryCell
-			for _, val := range row {
-				v, _, _, err := table.evaluateCell(rowIndex, val)
+			for i, val := range row {
+				v, _, ct, err := table.evaluateCell(rowIndex, val)
 				if err != nil {
 					return fmt.Errorf("unable to evaluate cell: %w", err)
 				}
+				if ct != table.columnTypes[i] {
+					return fmt.Errorf("mismatched types: %s != %s", ct, table.columnTypes[i])
+				}
 				cells = append(cells, v)
+			}
+
+			if len(cells) != len(table.columns) {
+				return fmt.Errorf("mismatched number of fields: %d != %d", len(cells), len(table.columns))
 			}
 			table.rows = append(table.rows, cells)
 		}

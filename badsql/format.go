@@ -17,6 +17,18 @@ const (
 	BoolType
 )
 
+func (c ColumnType) String() string {
+	switch c {
+	case TextType:
+		return "text"
+	case IntType:
+		return "int"
+	case BoolType:
+		return "bool"
+	}
+	return "unknown"
+}
+
 type Cell interface {
 	AsText() string
 	AsInt() int32
