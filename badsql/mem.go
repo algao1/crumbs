@@ -81,7 +81,6 @@ func (t *table) evaluateInfixOperationCell(rowIndex int, stmt sqlparser.BinaryEx
 		case IntType:
 			return MemoryCell(intToBytes(l.AsInt() + r.AsInt())), colName, IntType, nil
 		}
-
 		return nil, "", 0, ErrInvalidOperands
 	}
 
@@ -103,22 +102,59 @@ func (t *table) evaluateInfixComparisonCell(rowIndex int, stmt sqlparser.Compari
 		if lt != rt {
 			return falseMemoryCell, unknownColumn, BoolType, ErrInvalidOperands
 		}
-
-		eq := l.equals(r)
-		if lt == TextType && eq {
+		if l.equals(r) {
 			return trueMemoryCell, unknownColumn, BoolType, nil
 		}
-		if lt == IntType && eq {
+		return falseMemoryCell, unknownColumn, BoolType, nil
+	case sqlparser.NotEqualStr:
+		if lt != rt {
+			return falseMemoryCell, unknownColumn, BoolType, ErrInvalidOperands
+		}
+		if !l.equals(r) {
 			return trueMemoryCell, unknownColumn, BoolType, nil
 		}
-		if lt == BoolType && eq {
-			return trueMemoryCell, unknownColumn, BoolType, nil
-		}
-
 		return falseMemoryCell, unknownColumn, BoolType, nil
 	}
 
 	return nil, "", 0, ErrInvalidCell
+}
+
+func (t *table) evaluateAndCell(rowIndex int, stmt sqlparser.AndExpr) (MemoryCell, string, ColumnType, error) {
+	l, _, lt, err := t.evaluateCell(rowIndex, stmt.Left)
+	if err != nil {
+		return nil, "", 0, err
+	}
+	r, _, rt, err := t.evaluateCell(rowIndex, stmt.Right)
+	if err != nil {
+		return nil, "", 0, err
+	}
+
+	if lt != BoolType || rt != BoolType {
+		return nil, "", 0, ErrInvalidCell
+	}
+	if l.equals(r) && l.equals(trueMemoryCell) {
+		return trueMemoryCell, unknownColumn, BoolType, nil
+	}
+	return falseMemoryCell, unknownColumn, BoolType, nil
+}
+
+func (t *table) evaluateOrCell(rowIndex int, stmt sqlparser.OrExpr) (MemoryCell, string, ColumnType, error) {
+	l, _, lt, err := t.evaluateCell(rowIndex, stmt.Left)
+	if err != nil {
+		return nil, "", 0, err
+	}
+	r, _, rt, err := t.evaluateCell(rowIndex, stmt.Right)
+	if err != nil {
+		return nil, "", 0, err
+	}
+
+	if lt != BoolType || rt != BoolType {
+		return nil, "", 0, ErrInvalidCell
+	}
+	if l.equals(trueMemoryCell) || r.equals(trueMemoryCell) {
+		return trueMemoryCell, unknownColumn, BoolType, nil
+	}
+	return falseMemoryCell, unknownColumn, BoolType, nil
 }
 
 func (t *table) evaluateCell(rowIndex int, stmt sqlparser.Expr) (MemoryCell, string, ColumnType, error) {
@@ -146,6 +182,10 @@ func (t *table) evaluateCell(rowIndex int, stmt sqlparser.Expr) (MemoryCell, str
 		return t.evaluateInfixComparisonCell(rowIndex, *stmt)
 	case *sqlparser.BinaryExpr:
 		return t.evaluateInfixOperationCell(rowIndex, *stmt)
+	case *sqlparser.AndExpr:
+		return t.evaluateAndCell(rowIndex, *stmt)
+	case *sqlparser.OrExpr:
+		return t.evaluateOrCell(rowIndex, *stmt)
 	}
 
 	return nil, "", 0, fmt.Errorf("unsupported expression: %s", stmt)
