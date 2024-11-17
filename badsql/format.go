@@ -1,4 +1,4 @@
-package main
+package badsql
 
 import (
 	"bytes"

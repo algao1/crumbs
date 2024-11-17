@@ -1,7 +1,6 @@
-package main
+package badsql
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 
@@ -9,47 +8,14 @@ import (
 	"github.com/xwb1989/sqlparser"
 )
 
-const (
-	PromptStr = ">> "
-)
-
-func main() {
-	db := NewMemoryBackend()
-	executor := Executor{db: db}
-	scanner := bufio.NewScanner(os.Stdin)
-
-	if len(os.Args) > 1 {
-		file, err := os.Open(os.Args[1])
-		if err != nil {
-			panic(err)
-		}
-		scanner := bufio.NewScanner(file)
-		for scanner.Scan() {
-			fmt.Println("executing line:", scanner.Text())
-			err := executor.HandleStatement(scanner.Text())
-			if err != nil {
-				fmt.Println("error:", err)
-			}
-		}
-		return
-	}
-
-	fmt.Print(PromptStr)
-	for scanner.Scan() {
-		err := executor.HandleStatement(scanner.Text())
-		if err != nil {
-			fmt.Println("error:", err)
-		}
-		fmt.Print(PromptStr)
-	}
-
-	if err := scanner.Err(); err != nil {
-		fmt.Println("error:", err)
-	}
-}
-
 type Executor struct {
 	db *MemoryBackend
+}
+
+func NewExecutor() *Executor {
+	return &Executor{
+		db: NewMemoryBackend(),
+	}
 }
 
 func (e *Executor) HandleStatement(s string) error {
