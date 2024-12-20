@@ -13,6 +13,10 @@ import (
 type TaskScheduler struct {
 	Tasks     *list.List
 	Generator *Generator
+
+	// Internals.
+	curFunc   string
+	heldLocks map[string]string
 	executed  map[string]int
 }
 
@@ -20,6 +24,7 @@ func NewTaskScheduler(gen *Generator) *TaskScheduler {
 	return &TaskScheduler{
 		Tasks:     list.New(),
 		Generator: gen,
+		heldLocks: make(map[string]string),
 		executed:  make(map[string]int),
 	}
 }
@@ -39,11 +44,24 @@ func (s *TaskScheduler) Execute() {
 	}
 
 	task := s.Tasks.Remove(cur).(Task)
+	s.curFunc = task.Name
 	s.executed[task.Name]++
 
 	if task.Callback() {
 		s.Tasks.PushBack(task)
 	}
+}
+
+func (s *TaskScheduler) Lock(lockID string) bool {
+	if _, ok := s.heldLocks[lockID]; ok {
+		return false
+	}
+	s.heldLocks[lockID] = s.curFunc
+	return true
+}
+
+func (s *TaskScheduler) Unlock(lockID string) {
+	delete(s.heldLocks, lockID)
 }
 
 func (s *TaskScheduler) Stats() {

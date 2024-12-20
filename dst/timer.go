@@ -34,7 +34,7 @@ func (t *Timer) AddEventWithDelay(f func() bool, name string, delay time.Duratio
 	})
 }
 
-func (t *Timer) Execute() {
+func (t *Timer) Progress() {
 	if len(t.Events) == 0 {
 		return
 	}

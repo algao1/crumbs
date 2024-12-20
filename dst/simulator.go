@@ -57,7 +57,7 @@ func (s *Simulator) Run() {
 	for {
 		// TODO: Can probably make this more customizable.
 		for range s.Generator.Rand() % 5 {
-			s.Timer.Execute()
+			s.Timer.Progress()
 		}
 		for range s.Generator.Rand() % 50 {
 			s.Scheduler.Execute()
@@ -96,4 +96,14 @@ func (s *Simulator) Spawn(fn func(yield func())) {
 		funcName,
 	)
 	s.funcCounter++
+}
+
+func (s *Simulator) Lock(lockID string, yield func()) {
+	for !s.Scheduler.Lock(lockID) {
+		yield()
+	}
+}
+
+func (s *Simulator) Unlock(lockID string) {
+	s.Scheduler.Unlock(lockID)
 }
