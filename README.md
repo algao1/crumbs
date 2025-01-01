@@ -18,7 +18,3 @@
 -   **coro** - Implementing coroutines following Russ Cox's [blog](https://research.swtch.com/coro).
 -   **dst** - A unsuccessful attempt at creating a deterministic simulation tester for Go (see [Reverie](https://github.com/facebookexperimental/reverie)).
 -   **load-shed** - Implementation of Uber's [Cinnamon Load Shedder](https://www.uber.com/blog/cinnamon-using-century-old-tech-to-build-a-mean-load-shedder/?uclick_id=0f04f49d-7cb2-4574-b24f-0fafec19a257), with some liberties taken.
-
-### Misc
-
--   **p2p-rpc** - A toy implementation of a peer-to-peer (p2p) network over gRPC using [Consul](https://github.com/hashicorp/consul) for service discovery.
