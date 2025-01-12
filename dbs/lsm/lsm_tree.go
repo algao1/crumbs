@@ -12,7 +12,7 @@ import (
 const (
 	DEFAULT_MEM_TABLE_SIZE     = 1024 * 1024 * 64 // 64 MB
 	DEFAULT_MAX_MEM_TABLES     = 4
-	DEFAULT_MAX_FLUSHED_TABLES = 4
+	DEFAULT_MAX_FLUSHED_TABLES = 16
 	DEFAULT_SPARSENESS         = 16
 	DEFAULT_ERROR_PCT          = 0.05
 	DEFAULT_FLUSH_PERIOD       = 15 * time.Second
@@ -32,6 +32,7 @@ type LSMTree struct {
 
 	memTableSize  int
 	maxMemTables  int
+	flushPeriod   time.Duration
 	flusherCloser chan struct{}
 }
 
@@ -58,6 +59,7 @@ func NewLSMTree(dir string, options ...LSMOption) (*LSMTree, error) {
 		),
 		memTableSize:  DEFAULT_MEM_TABLE_SIZE,
 		maxMemTables:  DEFAULT_MAX_MEM_TABLES,
+		flushPeriod:   DEFAULT_FLUSH_PERIOD,
 		flusherCloser: make(chan struct{}),
 		logger:        logger,
 	}
@@ -120,6 +122,8 @@ func (lt *LSMTree) FlushMemory() error {
 	defer lt.mu.Unlock()
 
 	toFlush := lt.tables
+	lt.logger.Info("flushing memtables", slog.Int("tables to flush", len(toFlush)))
+
 	for _, t := range toFlush {
 		if err := lt.stm.Add(t); err != nil {
 			return fmt.Errorf("unable to flush and close db: %w", err)
@@ -142,10 +146,11 @@ func (lt *LSMTree) Compact() {
 }
 
 func (lt *LSMTree) flushPeriodically() {
-	t := time.NewTicker(DEFAULT_FLUSH_PERIOD)
+	t := time.NewTicker(lt.flushPeriod)
 	for {
 		select {
 		case <-lt.flusherCloser:
+			lt.logger.Info("periodic flush goroutine closed")
 			return
 		case <-t.C:
 			lt.mu.Lock()
@@ -164,6 +169,7 @@ func (lt *LSMTree) flushPeriodically() {
 				lt.mu.Unlock()
 				continue
 			}
+			lt.logger.Info("flushing memtables", slog.Int("tables to flush", numToFlush))
 			lt.mu.Unlock()
 
 			for _, mt := range mts {

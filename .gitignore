@@ -6,7 +6,6 @@
 [Ll]ib
 [Ll]ib64
 [Ll]ocal
-[Ss]cripts
 pyvenv.cfg
 .venv
 pip-selfcheck.json
@@ -19,3 +18,7 @@ exp_*
 **/data
 cpu_profile.*
 *.txt
+
+# Profiles
+*.pprof
+cpu.svg

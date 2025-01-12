@@ -9,6 +9,8 @@ fi
 filename="$1"
 filename_no_ext="${filename%.*}"
 
+SCRIPT_DIR=$(dirname "$(realpath "$0")")
+
 # stackcollapse-go.pl $filename
 go tool pprof -raw -output="$filename_no_ext.txt" $filename
-stackcollapse-go.pl "$filename_no_ext.txt" | flamegraph.pl > "$filename_no_ext.svg"
+${SCRIPT_DIR}/stackcollapse-go.pl "$filename_no_ext.txt" | ${SCRIPT_DIR}/flamegraph.pl > "$filename_no_ext.svg"

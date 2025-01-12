@@ -1,5 +1,7 @@
 package lsm
 
+import "time"
+
 type LSMOption func(*LSMTree) *LSMTree
 
 func WithSparseness(n int) LSMOption {
@@ -26,6 +28,13 @@ func WithMemTableSize(size int) LSMOption {
 func WithMaxMemTables(max int) LSMOption {
 	return func(l *LSMTree) *LSMTree {
 		l.maxMemTables = max
+		return l
+	}
+}
+
+func WithFlushPeriod(period time.Duration) LSMOption {
+	return func(l *LSMTree) *LSMTree {
+		l.flushPeriod = period
 		return l
 	}
 }
