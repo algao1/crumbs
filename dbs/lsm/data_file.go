@@ -1,10 +1,10 @@
 package lsm
 
 import (
+	"bufio"
 	"encoding/binary"
 	"fmt"
 	"io"
-	"os"
 )
 
 type keyValue struct {
@@ -12,18 +12,22 @@ type keyValue struct {
 	value []byte
 }
 
-func flushBytes(file *os.File, b []byte) (int, error) {
+type bufferedWriter struct {
+	*bufio.Writer
+}
+
+func (bw *bufferedWriter) writeBytes(b []byte) (int, error) {
 	lb := make([]byte, 8)
 	binary.PutVarint(lb, int64(len(b)))
 
 	bytesWritten := 0
-	n, err := file.Write(lb)
+	n, err := bw.Write(lb)
 	if err != nil {
 		return 0, fmt.Errorf("unable to write length: %w", err)
 	}
 	bytesWritten += n
 
-	n, err = file.Write(b)
+	n, err = bw.Write(b)
 	if err != nil {
 		return 0, fmt.Errorf("unable to write contents: %w", err)
 	}

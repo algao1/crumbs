@@ -1,6 +1,7 @@
 package lsm
 
 import (
+	"bufio"
 	"bytes"
 	"container/heap"
 	"fmt"
@@ -16,7 +17,7 @@ import (
 )
 
 const (
-	WR_FLAGS = os.O_APPEND | os.O_CREATE | os.O_WRONLY
+	WR_FLAGS = os.O_APPEND | os.O_CREATE | os.O_RDWR
 )
 
 type SSTManager struct {
@@ -72,7 +73,8 @@ func (sm *SSTManager) Add(mt Memtable) error {
 	if err != nil {
 		return fmt.Errorf("unable to flush: %w", err)
 	}
-	defer dataFile.Close()
+	bw := bufferedWriter{bufio.NewWriterSize(dataFile, 1024*64)}
+	defer bw.Flush()
 
 	si := NewSparseIndex()
 	bf, err := NewBloomFilter(mt.Nodes(), sm.errorPct)
@@ -85,8 +87,8 @@ func (sm *SSTManager) Add(mt Memtable) error {
 	iter := 0
 	mt.Traverse(func(k string, v []byte) {
 		// TODO: Maybe exit early on fail?
-		kn, _ := flushBytes(dataFile, []byte(k))
-		vn, _ := flushBytes(dataFile, v)
+		kn, _ := bw.writeBytes([]byte(k))
+		vn, _ := bw.writeBytes(v)
 		bf.Add([]byte(k))
 
 		if iter%sm.sparseness == 0 {
@@ -97,11 +99,9 @@ func (sm *SSTManager) Add(mt Memtable) error {
 		iter++
 	})
 
-	encodeFiles(sm.dir, curCounter, meta, si, bf)
-
-	dataFile, err = os.Open(dataPath)
+	err = encodeFiles(sm.dir, curCounter, meta, si, bf)
 	if err != nil {
-		return fmt.Errorf("unable to open data file: %w", err)
+		return fmt.Errorf("unable to encode compacted files: %w", err)
 	}
 
 	sm.mu.Lock()
@@ -280,7 +280,8 @@ func (sm *SSTManager) compactTables(newID int, tables []SSTable) SSTable {
 		sm.logger.Error("unable to open data file for compaction", err)
 		return SSTable{}
 	}
-	defer dataFile.Close()
+	bw := bufferedWriter{bufio.NewWriterSize(dataFile, 1024*64)}
+	defer bw.Flush()
 
 	si := NewSparseIndex()
 	bf, err := NewBloomFilter(totalItems, sm.errorPct)
@@ -288,8 +289,8 @@ func (sm *SSTManager) compactTables(newID int, tables []SSTable) SSTable {
 		sm.logger.Error("unable to create bloom filter", err)
 		return SSTable{}
 	}
-	meta := &Meta{Level: level + 1, Items: totalItems}
 
+	meta := &Meta{Level: level + 1, Items: totalItems}
 	sparseness := int(math.Pow(float64(sm.sparseness), float64(level+2)))
 
 	offset := 0
@@ -307,8 +308,8 @@ func (sm *SSTManager) compactTables(newID int, tables []SSTable) SSTable {
 				})
 			}
 
-			kl, _ := flushBytes(dataFile, []byte(prevKeyFile.Key))
-			vl, _ := flushBytes(dataFile, prevKeyFile.Value)
+			kl, _ := bw.writeBytes([]byte(prevKeyFile.Key))
+			vl, _ := bw.writeBytes(prevKeyFile.Value)
 			bf.Add([]byte(prevKeyFile.Key))
 
 			offset += kl + vl
@@ -330,8 +331,8 @@ func (sm *SSTManager) compactTables(newID int, tables []SSTable) SSTable {
 	}
 
 	// We need to remember to do the last one.
-	kl, _ := flushBytes(dataFile, []byte(prevKeyFile.Key))
-	vl, _ := flushBytes(dataFile, prevKeyFile.Value)
+	kl, _ := bw.writeBytes([]byte(prevKeyFile.Key))
+	vl, _ := bw.writeBytes(prevKeyFile.Value)
 	bf.Add([]byte(prevKeyFile.Key))
 	offset += kl + vl
 
@@ -339,12 +340,6 @@ func (sm *SSTManager) compactTables(newID int, tables []SSTable) SSTable {
 	if err != nil {
 		sm.logger.Error("unable to encode compacted files", err)
 		return SSTable{}
-	}
-
-	dataFile, err = os.Open(dataPath)
-	if err != nil {
-		sm.logger.Error("unable to open compacted dataFile for reading", err)
-		panic(err)
 	}
 
 	return SSTable{
@@ -455,10 +450,3 @@ func getFileID(file string) int {
 	id, _ := strconv.Atoi(match)
 	return id
 }
-
-// See: https://dave.cheney.net/2014/12/24/inspecting-errors
-// Trying this pattern out to see if its any good.
-
-type InProgressError struct{}
-
-func (ip InProgressError) Error() string { return "in progress" }
