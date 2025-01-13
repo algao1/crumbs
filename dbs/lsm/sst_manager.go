@@ -27,6 +27,7 @@ type SSTManager struct {
 	dir       string
 	ssTables  [][]SSTable
 	ssCounter int
+	bytesPool sync.Pool
 
 	// Options.
 	sparseness int
@@ -50,8 +51,11 @@ type SSTable struct {
 
 func NewSSTManager(dir string, logger *slog.Logger, opts SSTMOptions) *SSTManager {
 	sm := &SSTManager{
-		dir:        dir,
-		ssTables:   make([][]SSTable, 1),
+		dir:      dir,
+		ssTables: make([][]SSTable, 1),
+		bytesPool: sync.Pool{New: func() any {
+			return new([]byte)
+		}},
 		sparseness: opts.sparseness,
 		errorPct:   opts.errorPct,
 		logger:     logger,
@@ -124,7 +128,7 @@ func (sm *SSTManager) Find(key string) ([]byte, error) {
 
 	for _, level := range sm.ssTables {
 		for _, ss := range level {
-			b, found, err := findInSSTable(ss, key)
+			b, found, err := sm.findInSSTable(ss, key)
 			if err != nil {
 				return nil, fmt.Errorf("unable to search in SSTables: %w", err)
 			}
@@ -353,7 +357,7 @@ func (sm *SSTManager) compactTables(newID int, tables []SSTable) SSTable {
 }
 
 // findInSSTable expects caller to acquire read lock on SSTables.
-func findInSSTable(ss SSTable, key string) ([]byte, bool, error) {
+func (sm *SSTManager) findInSSTable(ss SSTable, key string) ([]byte, bool, error) {
 	if ss.BloomFilter != nil && !ss.BloomFilter.In([]byte(key)) {
 		return nil, false, nil
 	}
@@ -363,7 +367,14 @@ func findInSSTable(ss SSTable, key string) ([]byte, bool, error) {
 		maxOffset = ss.FileSize
 	}
 
-	chunk, err := readChunk(ss.DataFile, offset, maxOffset-offset)
+	chunkB := *sm.bytesPool.Get().(*[]byte)
+	if cap(chunkB) < maxOffset-offset {
+		chunkB = make([]byte, maxOffset-offset)
+	}
+	chunkB = chunkB[:maxOffset-offset]
+	defer sm.bytesPool.Put(&chunkB)
+
+	chunk, err := readChunkWithBuffer(ss.DataFile, offset, chunkB)
 	if err != nil {
 		return nil, false, fmt.Errorf("unable to read chunk: %w", err)
 	}

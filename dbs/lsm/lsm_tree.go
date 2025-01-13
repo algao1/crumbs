@@ -14,7 +14,7 @@ const (
 	DEFAULT_MAX_MEM_TABLES     = 4
 	DEFAULT_MAX_FLUSHED_TABLES = 16
 	DEFAULT_SPARSENESS         = 16
-	DEFAULT_ERROR_PCT          = 0.05
+	DEFAULT_ERROR_PCT          = 0.01
 	DEFAULT_FLUSH_PERIOD       = 15 * time.Second
 )
 
@@ -134,14 +134,6 @@ func (lt *LSMTree) FlushMemory() error {
 }
 
 func (lt *LSMTree) Compact() {
-	lt.flusherCloser <- struct{}{}
-	defer func() {
-		// We do this because Go prevents recursive read locking.
-		// So it blocks all subsequent reads that occurs after we try to
-		// add/flush the new memtable.
-		// See https://pkg.go.dev/sync#RWMutex.
-		go lt.flushPeriodically()
-	}()
 	lt.stm.Compact()
 }
 

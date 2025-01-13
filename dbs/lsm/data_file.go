@@ -38,6 +38,10 @@ func (bw *bufferedWriter) writeBytes(b []byte) (int, error) {
 
 func readChunk(file io.ReaderAt, offset, size int) ([]byte, error) {
 	b := make([]byte, size)
+	return readChunkWithBuffer(file, offset, b)
+}
+
+func readChunkWithBuffer(file io.ReaderAt, offset int, b []byte) ([]byte, error) {
 	_, err := file.ReadAt(b, int64(offset))
 	if err != nil {
 		return nil, fmt.Errorf("unable to read chunk: %w", err)

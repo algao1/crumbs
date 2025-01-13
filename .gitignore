@@ -18,6 +18,7 @@ exp_*
 **/data
 cpu_profile.*
 *.txt
+.test
 
 # Profiles
 *.pprof
