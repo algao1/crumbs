@@ -16,9 +16,12 @@ type bufferedWriter struct {
 	*bufio.Writer
 }
 
-func (bw *bufferedWriter) writeBytes(b []byte) (int, error) {
-	lb := make([]byte, 8)
-	binary.PutVarint(lb, int64(len(b)))
+func (bw *bufferedWriter) writeKeyVal(key string, val []byte) (int, error) {
+	lb := make([]byte, 16)
+	keyb := []byte(key)
+
+	binary.PutVarint(lb[:8], int64(len(keyb)))
+	binary.PutVarint(lb[8:], int64(len(val)))
 
 	bytesWritten := 0
 	n, err := bw.Write(lb)
@@ -27,9 +30,15 @@ func (bw *bufferedWriter) writeBytes(b []byte) (int, error) {
 	}
 	bytesWritten += n
 
-	n, err = bw.Write(b)
+	n, err = bw.Write(keyb)
 	if err != nil {
-		return 0, fmt.Errorf("unable to write contents: %w", err)
+		return 0, fmt.Errorf("unable to write key: %w", err)
+	}
+	bytesWritten += n
+
+	n, err = bw.Write(val)
+	if err != nil {
+		return 0, fmt.Errorf("unable to write val: %w", err)
 	}
 	bytesWritten += n
 
@@ -49,40 +58,37 @@ func readChunkWithBuffer(file io.ReaderAt, offset int, b []byte) ([]byte, error)
 	return b, nil
 }
 
-func readKeyValue(reader io.Reader) (keyValue, int, error) {
-	kb, kSize, err := readElement(reader)
+func readKeyVal(reader io.Reader) (keyValue, int, error) {
+	lb := make([]byte, 16)
+	_, err := reader.Read(lb)
 	if err != nil {
-		return keyValue{}, 0, fmt.Errorf("unable to read key: %w", err)
+		return keyValue{}, 0, fmt.Errorf("unable to read length: %w", err)
 	}
 
-	vb, vSize, err := readElement(reader)
+	l1, n1 := binary.Varint(lb[:8])
+	if n1 <= 0 {
+		return keyValue{}, 0, fmt.Errorf("unable to decode length of binary")
+	}
+	if l1 < 0 {
+		return keyValue{}, 0, fmt.Errorf("unexpectedly got negative length: %d", l1)
+	}
+
+	l2, n2 := binary.Varint(lb[8:])
+	if n2 <= 0 {
+		return keyValue{}, 0, fmt.Errorf("unable to decode length of binary")
+	}
+	if l2 < 0 {
+		return keyValue{}, 0, fmt.Errorf("unexpectedly got negative length: %d", l2)
+	}
+
+	b := make([]byte, l1+l2)
+	_, err = reader.Read(b)
 	if err != nil {
 		return keyValue{}, 0, fmt.Errorf("unable to read value: %w", err)
 	}
 
-	return keyValue{key: kb, value: vb}, kSize + vSize, nil
-}
-
-func readElement(reader io.Reader) ([]byte, int, error) {
-	lb := make([]byte, 8)
-	_, err := reader.Read(lb)
-	if err != nil {
-		return nil, 0, fmt.Errorf("unable to read length: %w", err)
-	}
-
-	l, n := binary.Varint(lb)
-	if n <= 0 {
-		return nil, 0, fmt.Errorf("unable to decode length of binary")
-	}
-	if l < 0 {
-		return nil, 0, fmt.Errorf("unexpectedly got negative length: %d", l)
-	}
-
-	b := make([]byte, l)
-	_, err = reader.Read(b)
-	if err != nil {
-		return nil, 0, fmt.Errorf("unable to read value: %w", err)
-	}
-
-	return b, int(8 + l), nil
+	return keyValue{
+		key:   b[:l1],
+		value: b[l1:],
+	}, int(l1 + l2), nil
 }

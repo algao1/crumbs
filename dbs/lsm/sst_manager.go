@@ -91,15 +91,14 @@ func (sm *SSTManager) Add(mt Memtable) error {
 	iter := 0
 	mt.Traverse(func(k string, v []byte) {
 		// TODO: Maybe exit early on fail?
-		kn, _ := bw.writeBytes([]byte(k))
-		vn, _ := bw.writeBytes(v)
+		n, _ := bw.writeKeyVal(k, v)
 		bf.Add([]byte(k))
 
 		if iter%sm.sparseness == 0 {
 			si.Append(recordOffset{Key: k, Offset: offset})
 		}
 
-		offset += kn + vn
+		offset += n
 		iter++
 	})
 
@@ -267,7 +266,7 @@ func (sm *SSTManager) compactTables(newID int, tables []SSTable) SSTable {
 		chunk, _ := readChunk(t.DataFile, 0, t.FileSize)
 		buf := bytes.NewBuffer(chunk)
 
-		kvp, _, _ := readKeyValue(buf)
+		kvp, _, _ := readKeyVal(buf)
 		kfh[i] = KeyFile{
 			Key:     string(kvp.key),
 			Value:   kvp.value,
@@ -312,11 +311,10 @@ func (sm *SSTManager) compactTables(newID int, tables []SSTable) SSTable {
 				})
 			}
 
-			kl, _ := bw.writeBytes([]byte(prevKeyFile.Key))
-			vl, _ := bw.writeBytes(prevKeyFile.Value)
+			n, _ := bw.writeKeyVal(prevKeyFile.Key, prevKeyFile.Value)
 			bf.Add([]byte(prevKeyFile.Key))
 
-			offset += kl + vl
+			offset += n
 			iter++
 		}
 
@@ -324,8 +322,7 @@ func (sm *SSTManager) compactTables(newID int, tables []SSTable) SSTable {
 		if keyFile.Reader.Len() == 0 {
 			continue
 		}
-		kvp, _, _ := readKeyValue(keyFile.Reader)
-
+		kvp, _, _ := readKeyVal(keyFile.Reader)
 		heap.Push(&kfh, KeyFile{
 			Key:     string(kvp.key),
 			Value:   kvp.value,
@@ -335,10 +332,9 @@ func (sm *SSTManager) compactTables(newID int, tables []SSTable) SSTable {
 	}
 
 	// We need to remember to do the last one.
-	kl, _ := bw.writeBytes([]byte(prevKeyFile.Key))
-	vl, _ := bw.writeBytes(prevKeyFile.Value)
+	n, _ := bw.writeKeyVal(prevKeyFile.Key, prevKeyFile.Value)
 	bf.Add([]byte(prevKeyFile.Key))
-	offset += kl + vl
+	offset += n
 
 	err = encodeFiles(sm.dir, newID, meta, si, bf)
 	if err != nil {
@@ -381,7 +377,7 @@ func (sm *SSTManager) findInSSTable(ss SSTable, key string) ([]byte, bool, error
 	buf := bytes.NewBuffer(chunk)
 
 	for buf.Len() > 0 {
-		kvp, _, err := readKeyValue(buf)
+		kvp, _, err := readKeyVal(buf)
 		if err != nil {
 			return nil, false, fmt.Errorf("unable to find in SSTable: %w", err)
 		}
