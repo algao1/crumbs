@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"container/heap"
+	"crumbs/bloom"
 	"fmt"
 	"math"
 	"os"
@@ -45,7 +46,7 @@ type SSTable struct {
 
 	Meta        *Meta
 	Index       *SparseIndex
-	BloomFilter *BloomFilter
+	BloomFilter *bloom.BloomFilterV2
 	DataFile    *os.File
 }
 
@@ -81,7 +82,7 @@ func (sm *SSTManager) Add(mt Memtable) error {
 	defer bw.Flush()
 
 	si := NewSparseIndex()
-	bf, err := NewBloomFilter(mt.Nodes(), sm.errorPct)
+	bf, err := bloom.NewBloomFilterV2(mt.Nodes(), sm.errorPct)
 	if err != nil {
 		return fmt.Errorf("unable to create bloom filter: %w", err)
 	}
@@ -167,7 +168,7 @@ func (sm *SSTManager) Load() error {
 			return fmt.Errorf("unable to decode sparse index: %w", err)
 		}
 
-		bf, _ := NewBloomFilter(1, 1)
+		bf, _ := bloom.NewBloomFilterV2(1, 1)
 		if err = bf.Decode(ssFiles.bloomFiles[i]); err != nil {
 			return fmt.Errorf("unable to decode bloom filter: %w", err)
 		}
@@ -287,7 +288,7 @@ func (sm *SSTManager) compactTables(newID int, tables []SSTable) SSTable {
 	defer bw.Flush()
 
 	si := NewSparseIndex()
-	bf, err := NewBloomFilter(totalItems, sm.errorPct)
+	bf, err := bloom.NewBloomFilterV2(totalItems, sm.errorPct)
 	if err != nil {
 		sm.logger.Error("unable to create bloom filter", err)
 		return SSTable{}
@@ -397,7 +398,7 @@ type ssFiles struct {
 	bloomFiles []string
 }
 
-func encodeFiles(dir string, id int, meta *Meta, si *SparseIndex, bf *BloomFilter) error {
+func encodeFiles(dir string, id int, meta *Meta, si *SparseIndex, bf *bloom.BloomFilterV2) error {
 	metaPath := filepath.Join(dir, fmt.Sprintf("lsm-%d.meta", id))
 	indexPath := filepath.Join(dir, fmt.Sprintf("lsm-%d.index", id))
 	bloomPath := filepath.Join(dir, fmt.Sprintf("lsm-%d.bloom", id))

@@ -1,4 +1,4 @@
-package lsm
+package bloom
 
 import (
 	"encoding/gob"
@@ -10,19 +10,19 @@ import (
 
 type hashFunc func([]byte) int
 
-type BloomFilter struct {
+type BloomFilterV1 struct {
 	Bitset    []bool
 	hashFuncs []hashFunc
 	K         int
 }
 
-func NewBloomFilter(n int, dfp float64) (*BloomFilter, error) {
-	k, m := optimalKM(float64(n), dfp)
+func NewBloomFilterV1(n int, fpr float64) (*BloomFilterV1, error) {
+	k, m := optimalKM(float64(n), fpr)
 	if k < 0 || m < 0 {
-		return nil, fmt.Errorf("unable to select k and m (n=%d, dfp=%.3f)", n, dfp)
+		return nil, fmt.Errorf("unable to select k and m (n=%d, fpr=%.3f)", n, fpr)
 	}
 
-	bf := BloomFilter{
+	bf := BloomFilterV1{
 		Bitset:    make([]bool, m),
 		K:         k,
 		hashFuncs: make([]hashFunc, k),
@@ -35,7 +35,7 @@ func NewBloomFilter(n int, dfp float64) (*BloomFilter, error) {
 	return &bf, nil
 }
 
-func (bf *BloomFilter) Add(k []byte) {
+func (bf *BloomFilterV1) Add(k []byte) {
 	m := len(bf.Bitset)
 	for _, hf := range bf.hashFuncs {
 		idx := hf(k) % m
@@ -43,7 +43,7 @@ func (bf *BloomFilter) Add(k []byte) {
 	}
 }
 
-func (bf *BloomFilter) In(k []byte) bool {
+func (bf *BloomFilterV1) In(k []byte) bool {
 	m := len(bf.Bitset)
 	for _, hf := range bf.hashFuncs {
 		idx := hf(k) % m
@@ -54,14 +54,14 @@ func (bf *BloomFilter) In(k []byte) bool {
 	return true
 }
 
-func (bf *BloomFilter) Encode(filename string) error {
+func (bf *BloomFilterV1) Encode(filename string) error {
 	file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return fmt.Errorf("unable to open file for bloom filter: %w", err)
 	}
 	defer file.Close()
 
-	err = gob.NewEncoder(file).Encode(BloomFilter{
+	err = gob.NewEncoder(file).Encode(BloomFilterV1{
 		Bitset: bf.Bitset,
 		K:      bf.K,
 	})
@@ -71,14 +71,14 @@ func (bf *BloomFilter) Encode(filename string) error {
 	return nil
 }
 
-func (bf *BloomFilter) Decode(filename string) error {
+func (bf *BloomFilterV1) Decode(filename string) error {
 	file, err := os.Open(filename)
 	if err != nil {
 		return fmt.Errorf("unable to open file for bloom filter: %w", err)
 	}
 	defer file.Close()
 
-	var nbf BloomFilter
+	var nbf BloomFilterV1
 	err = gob.NewDecoder(file).Decode(&nbf)
 	if err != nil {
 		return fmt.Errorf("unable to decode bloom filter: %w", err)
@@ -106,7 +106,7 @@ func hashFnv1a(seed uint64) hashFunc {
 	}
 }
 
-func optimalKM(n, dfp float64) (int, int) {
+func optimalKM(n, fpr float64) (int, int) {
 	var m, k float64
 	l, r := float64(0), 100*n
 
@@ -114,11 +114,11 @@ func optimalKM(n, dfp float64) (int, int) {
 		m = l + (r-l)/2
 		k = (m / n) * math.Log(2)
 		fp := math.Pow((1 - math.Exp(-k*n/m)), k)
-		if math.Abs(dfp-fp) < dfp/10 {
+		if math.Abs(fpr-fp) < fpr/10 {
 			return int(math.Round(k)), int(math.Round(m))
 		}
 
-		if fp < dfp {
+		if fp < fpr {
 			r = m
 		} else {
 			l = m + 1

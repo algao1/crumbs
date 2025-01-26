@@ -32,6 +32,15 @@ func main() {
 		panic(err)
 	}
 
+	if cpuProfile {
+		f, err := os.Create("cpu.pprof")
+		if err != nil {
+			log.Fatal(err)
+		}
+		pprof.StartCPUProfile(f)
+		defer pprof.StopCPUProfile()
+	}
+
 	t := time.Now()
 	b := make([]byte, 128)
 	for i := range 1_000_000 {
@@ -50,15 +59,6 @@ func main() {
 	t = time.Now()
 	db.Compact()
 	fmt.Println("compacting", time.Since(t))
-
-	if cpuProfile {
-		f, err := os.Create("cpu.pprof")
-		if err != nil {
-			log.Fatal(err)
-		}
-		pprof.StartCPUProfile(f)
-		defer pprof.StopCPUProfile()
-	}
 
 	t = time.Now()
 	for range 250_000 {

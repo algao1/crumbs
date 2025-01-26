@@ -4,6 +4,7 @@ go 1.22
 
 require (
 	github.com/asecurityteam/rolling v2.0.4+incompatible
+	github.com/cespare/xxhash v1.1.0
 	github.com/eapache/queue/v2 v2.0.0-20230407133247-75960ed334e4
 	github.com/jamiealquiza/tachymeter v2.0.0+incompatible
 	github.com/magiconair/properties v1.8.0
